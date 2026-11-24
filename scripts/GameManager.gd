@@ -66,7 +66,8 @@ const ROSTER: Array[Dictionary] = [
 ]
 
 const FIGHTER_SCENES: Dictionary = {
-	"enfj": "res://scenes/ENFJ.tscn"
+	"enfj": "res://scenes/ENFJ.tscn",
+	"isfp": "res://scenes/ISFP.tscn"
 }
 
 # 已有精灵表角色的切帧配置（后续新增角色或导出 avatar_sheet.png 只需在此登记即可自动生效）

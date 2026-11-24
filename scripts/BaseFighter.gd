@@ -13,6 +13,8 @@ signal ko_triggered(fighter: BaseFighter, killer: BaseFighter, by_ultimate: bool
 @export var gravity_force: float = 1650.0
 @export var portrait_texture: Texture2D
 @export var target_sprite_height: float = 132.0
+@export var sprite_scale_mult: float = 1.0
+@export var sprite_y_offset: float = 0.0
 
 var hp: int = 110
 var ep: float = 0.0
@@ -75,6 +77,7 @@ var default_hitbox_pos: Vector2 = Vector2(40.0, -48.0)
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hitbox_col: CollisionShape2D = $Hitbox/CollisionShape2D
 @onready var hitbox_shape: RectangleShape2D = $Hitbox/CollisionShape2D.shape as RectangleShape2D
+@onready var anim_player: AnimationPlayer = get_node_or_null("AnimationPlayer")
 
 var rig: FighterRig = null
 
@@ -114,6 +117,17 @@ func load_fighter_sprites(fid: String) -> void:
 		if sprite:
 			sprite.visible = true
 
+	# 如果本角色已经在场景里使用 AnimationPlayer 编排了专属动画，自动校准缩放并跳过旧系统的强行换图！
+	if anim_player != null:
+		if sprite and sprite.texture:
+			var rows: float = float(maxi(1, sprite.vframes))
+			var frame_h: float = sprite.texture.get_size().y / rows
+			var sc: float = (target_sprite_height / maxf(1.0, frame_h)) * sprite_scale_mult
+			_base_sprite_scale = Vector2(sc, sc)
+			sprite.scale = _base_sprite_scale
+			sprite.position = Vector2(0.0, -target_sprite_height * 0.5 + sprite_y_offset)
+		_play_anim("idle", true)
+		return
 	_sheet_configs = GameManager.get_sprite_config(fid)
 	_sheet_textures.clear()
 	for state_name in _sheet_configs.keys():
@@ -150,6 +164,28 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 	if rig != null and rig.visible:
 		rig.play_state(state_name, force_reset, maxf(0.22, action_anim_timer))
 		return
+	# ----------------- 【AnimationPlayer 优先通道】 -----------------
+	if anim_player and anim_player.has_animation(state_name):
+		# 如果当前已经在播放这个动画，且没有要求强制重播，就让它继续播，不要每帧打断！
+		if anim_player.current_animation == state_name and anim_player.is_playing() and not force_reset:
+			return
+		anim_player.play(state_name)
+		# 核心关键：立即将动画推进一步（advance(0)），让 AnimationPlayer 的第 0 秒贴图和切片轨道立即生效！
+		anim_player.advance(0.0)
+
+		# 此时 sprite.texture 已经是新动画切换后的正式图片了，再进行缩放与踩地高度校准！
+		if sprite and sprite.texture:
+			var rows: float = float(maxi(1, sprite.vframes))
+			var frame_h: float = sprite.texture.get_size().y / rows
+			# 根据是 stand.png（留白很多）还是 move.png（几乎占满）分别给最协调的比例
+			var mult: float = sprite_scale_mult if rows == 1.0 else (sprite_scale_mult * (407.0 / 724.0) / (318.0 / 362.0))
+			var sc: float = (target_sprite_height / maxf(1.0, frame_h)) * mult
+			_base_sprite_scale = Vector2(sc, sc)
+			sprite.scale = _base_sprite_scale
+			var y_off: float = sprite_y_offset if rows == 1.0 else (sprite_y_offset * 0.4)
+			sprite.position = Vector2(0.0, -target_sprite_height * 0.5 + y_off)
+		return
+	# ---------------------------------------------------------------
 	if _sheet_textures.is_empty() or sprite == null:
 		return
 	var target: String = state_name if _sheet_textures.has(state_name) else "idle"
@@ -174,6 +210,9 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 	sprite.position = Vector2(0.0, -target_sprite_height * 0.5)
 
 func _advance_anim(delta: float) -> void:
+	# 【核心修复】：如果当前 AnimationPlayer 正在播放动画，直接返回，绝不插手覆盖帧！
+	if anim_player and anim_player.is_playing():
+		return
 	if _sheet_textures.is_empty() or _current_anim == "" or sprite == null:
 		return
 	var cfg: Dictionary = _sheet_configs[_current_anim] as Dictionary
