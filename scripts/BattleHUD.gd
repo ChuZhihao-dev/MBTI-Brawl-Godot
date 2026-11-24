@@ -18,6 +18,14 @@ var _p1_ep_bar: ProgressBar
 var _p2_ep_bar: ProgressBar
 var _p1_ep_lbl: Label
 var _p2_ep_lbl: Label
+var _p1_status_lbl: Label
+var _p2_status_lbl: Label
+var _p1_trail_val: float = 100.0
+var _p2_trail_val: float = 100.0
+var _p1_trail_bar: ProgressBar
+var _p2_trail_bar: ProgressBar
+var _p1_combo_lbl: Label
+var _p2_combo_lbl: Label
 var _timer_lbl: Label
 var _mute_btn: Button
 var _hint_lbl: Label
@@ -47,10 +55,66 @@ func _ready() -> void:
 	_refresh_key_hints()
 	AudioManager.mute_changed.connect(_on_mute_changed)
 	GameManager.keybindings_changed.connect(_refresh_key_hints)
+	GameManager.combo_updated.connect(_on_combo_updated)
 
 func bind_fighters(p1: BaseFighter, p2: BaseFighter) -> void:
 	_p1 = p1
 	_p2 = p2
+	if _p1:
+		_p1_trail_val = float(_p1.hp)
+	if _p2:
+		_p2_trail_val = float(_p2.hp)
+
+func play_round_intro(on_fight: Callable) -> void:
+	var banner := Label.new()
+	banner.set_anchors_preset(Control.PRESET_CENTER)
+	banner.offset_left = -360.0
+	banner.offset_right = 360.0
+	banner.offset_top = -90.0
+	banner.offset_bottom = 90.0
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	banner.text = "READY..."
+	banner.add_theme_font_size_override("font_size", 92)
+	banner.add_theme_color_override("font_color", Color("#fef08a"))
+	banner.add_theme_color_override("font_outline_color", Color("#0f172a"))
+	banner.add_theme_constant_override("outline_size", 14)
+	banner.pivot_offset = Vector2(360.0, 90.0)
+	banner.scale = Vector2(0.5, 0.5)
+	add_child(banner)
+
+	AudioManager.play_sfx("round_ready", -2.0)
+	var tw := create_tween()
+	tw.tween_property(banner, "scale", Vector2(1.08, 1.08), 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.55)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(banner):
+			banner.text = "FIGHT!!"
+			banner.add_theme_color_override("font_color", Color("#4ade80"))
+			banner.scale = Vector2(1.55, 1.55)
+		AudioManager.play_sfx("round_fight", -1.5)
+		if on_fight.is_valid():
+			on_fight.call()
+	)
+	tw.tween_property(banner, "scale", Vector2(1.0, 1.0), 0.22).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.35)
+	tw.tween_property(banner, "modulate:a", 0.0, 0.25)
+	tw.tween_callback(banner.queue_free)
+
+func _on_combo_updated(attacker_idx: int, combo_count: int, total_dmg: int) -> void:
+	var lbl: Label = _p1_combo_lbl if attacker_idx == 1 else _p2_combo_lbl
+	if lbl == null:
+		return
+	if combo_count < 2:
+		lbl.visible = false
+		return
+	lbl.visible = true
+	var suffix := " SUPER!!" if combo_count >= 5 else ("!" if combo_count >= 3 else "")
+	lbl.text = "%d HITS%s  ·  %d DMG" % [combo_count, suffix, total_dmg]
+	lbl.add_theme_color_override("font_color", Color("#fde047") if combo_count >= 4 else Color("#38bdf8"))
+	lbl.scale = Vector2(1.32, 1.32)
+	var tw := create_tween()
+	tw.tween_property(lbl, "scale", Vector2.ONE, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func set_timer_value(sec: int) -> void:
 	if _timer_lbl:
@@ -58,7 +122,23 @@ func set_timer_value(sec: int) -> void:
 		_timer_lbl.add_theme_color_override("font_color", Color("#ef4444") if sec <= 15 else Color("#0f172a"))
 
 func _build_hud_extensions() -> void:
-	# 1P / 2P 能量条（EP）
+	# 延迟扣血黄条（叠加在血条底层）
+	_p1_trail_bar = ProgressBar.new()
+	_p1_trail_bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_p1_trail_bar.show_percentage = false
+	_p1_trail_bar.z_index = -1
+	UIStyle.style_hp_bar(_p1_trail_bar, Color("#facc15"))
+	p1_bar.add_child(_p1_trail_bar)
+
+	_p2_trail_bar = ProgressBar.new()
+	_p2_trail_bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_p2_trail_bar.fill_mode = ProgressBar.FILL_END_TO_BEGIN
+	_p2_trail_bar.show_percentage = false
+	_p2_trail_bar.z_index = -1
+	UIStyle.style_hp_bar(_p2_trail_bar, Color("#facc15"))
+	p2_bar.add_child(_p2_trail_bar)
+
+	# 1P / 2P 能量条（EP）与技能冷却/Buff 状态条
 	_p1_ep_bar = ProgressBar.new()
 	_p1_ep_bar.custom_minimum_size = Vector2(0, 12)
 	_p1_ep_bar.max_value = 100.0
@@ -66,10 +146,19 @@ func _build_hud_extensions() -> void:
 	UIStyle.style_hp_bar(_p1_ep_bar, Color("#0ea5e9"))
 	p1_box.add_child(_p1_ep_bar)
 
+	var p1_sub := HBoxContainer.new()
+	p1_box.add_child(p1_sub)
 	_p1_ep_lbl = Label.new()
+	_p1_ep_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_p1_ep_lbl.add_theme_font_size_override("font_size", 14)
 	_p1_ep_lbl.add_theme_color_override("font_color", Color("#0f172a"))
-	p1_box.add_child(_p1_ep_lbl)
+	p1_sub.add_child(_p1_ep_lbl)
+
+	_p1_status_lbl = Label.new()
+	_p1_status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_p1_status_lbl.add_theme_font_size_override("font_size", 13)
+	_p1_status_lbl.add_theme_color_override("font_color", Color("#059669"))
+	p1_sub.add_child(_p1_status_lbl)
 
 	_p2_ep_bar = ProgressBar.new()
 	_p2_ep_bar.custom_minimum_size = Vector2(0, 12)
@@ -79,11 +168,41 @@ func _build_hud_extensions() -> void:
 	UIStyle.style_hp_bar(_p2_ep_bar, Color("#0ea5e9"))
 	p2_box.add_child(_p2_ep_bar)
 
+	var p2_sub := HBoxContainer.new()
+	p2_box.add_child(p2_sub)
+	_p2_status_lbl = Label.new()
+	_p2_status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_p2_status_lbl.add_theme_font_size_override("font_size", 13)
+	_p2_status_lbl.add_theme_color_override("font_color", Color("#059669"))
+	p2_sub.add_child(_p2_status_lbl)
+
 	_p2_ep_lbl = Label.new()
 	_p2_ep_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_p2_ep_lbl.add_theme_font_size_override("font_size", 14)
 	_p2_ep_lbl.add_theme_color_override("font_color", Color("#0f172a"))
-	p2_box.add_child(_p2_ep_lbl)
+	p2_sub.add_child(_p2_ep_lbl)
+
+	# 实时连击标牌
+	_p1_combo_lbl = Label.new()
+	_p1_combo_lbl.position = Vector2(46.0, 148.0)
+	_p1_combo_lbl.add_theme_font_size_override("font_size", 32)
+	_p1_combo_lbl.add_theme_color_override("font_outline_color", Color("#0f172a"))
+	_p1_combo_lbl.add_theme_constant_override("outline_size", 8)
+	_p1_combo_lbl.visible = false
+	add_child(_p1_combo_lbl)
+
+	_p2_combo_lbl = Label.new()
+	_p2_combo_lbl.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_p2_combo_lbl.offset_left = -420.0
+	_p2_combo_lbl.offset_right = -46.0
+	_p2_combo_lbl.offset_top = 148.0
+	_p2_combo_lbl.offset_bottom = 196.0
+	_p2_combo_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_p2_combo_lbl.add_theme_font_size_override("font_size", 32)
+	_p2_combo_lbl.add_theme_color_override("font_outline_color", Color("#0f172a"))
+	_p2_combo_lbl.add_theme_constant_override("outline_size", 8)
+	_p2_combo_lbl.visible = false
+	add_child(_p2_combo_lbl)
 
 	# 中央倒计时 + 暂停/静音区（替换原本孤立的 BackBtn 布局）
 	var center_box := VBoxContainer.new()
@@ -424,10 +543,23 @@ func _set_pause_open(open: bool) -> void:
 		GameManager.hitstop_timer = 0.0
 		get_tree().paused = false
 
-func _process(_delta: float) -> void:
+func _format_fighter_status(f: BaseFighter) -> String:
+	var parts: Array[String] = []
+	var buff: String = f.get_active_buff_status()
+	if buff != "":
+		parts.append("★ " + buff)
+	parts.append("技1:%s" % ("就绪" if f.skill1_cd <= 0.05 else "%.1fs" % f.skill1_cd))
+	parts.append("技2:%s" % ("就绪" if f.skill2_cd <= 0.05 else "%.1fs" % f.skill2_cd))
+	return "  |  ".join(parts)
+
+func _process(delta: float) -> void:
 	if is_instance_valid(_p1):
 		p1_bar.max_value = _p1.max_hp
 		p1_bar.value = _p1.hp
+		_p1_trail_val = maxf(float(_p1.hp), lerpf(_p1_trail_val, float(_p1.hp), 1.0 - exp(-5.0 * delta)))
+		if _p1_trail_bar:
+			_p1_trail_bar.max_value = _p1.max_hp
+			_p1_trail_bar.value = _p1_trail_val
 		p1_label.text = "1P %s   %d / %d" % [_p1.fighter_name, _p1.hp, _p1.max_hp]
 		_p1_ep_bar.value = _p1.ep
 		if _p1.ep >= 100.0:
@@ -436,10 +568,17 @@ func _process(_delta: float) -> void:
 		else:
 			_p1_ep_lbl.text = "EP %d%%" % int(_p1.ep)
 			_p1_ep_lbl.add_theme_color_override("font_color", Color("#0f172a"))
+		if _p1_status_lbl:
+			_p1_status_lbl.text = _format_fighter_status(_p1)
 	if is_instance_valid(_p2):
 		p2_bar.max_value = _p2.max_hp
 		p2_bar.value = _p2.hp
-		p2_label.text = "%d / %d   %s 2P" % [_p2.hp, _p2.max_hp, _p2.fighter_name]
+		_p2_trail_val = maxf(float(_p2.hp), lerpf(_p2_trail_val, float(_p2.hp), 1.0 - exp(-5.0 * delta)))
+		if _p2_trail_bar:
+			_p2_trail_bar.max_value = _p2.max_hp
+			_p2_trail_bar.value = _p2_trail_val
+		var p2_tag := ("AI·困难" if GameManager.ai_difficulty == "hard" else "AI·普通") if _p2.is_ai_controlled else "2P"
+		p2_label.text = "%d / %d   %s %s" % [_p2.hp, _p2.max_hp, _p2.fighter_name, p2_tag]
 		_p2_ep_bar.value = _p2.ep
 		if _p2.ep >= 100.0:
 			_p2_ep_lbl.text = "(%s) 大招就绪 · EP 100%%" % GameManager.get_action_key_label("p2_ult")
@@ -447,6 +586,8 @@ func _process(_delta: float) -> void:
 		else:
 			_p2_ep_lbl.text = "EP %d%%" % int(_p2.ep)
 			_p2_ep_lbl.add_theme_color_override("font_color", Color("#0f172a"))
+		if _p2_status_lbl:
+			_p2_status_lbl.text = _format_fighter_status(_p2)
 
 func _on_rematch_pressed() -> void:
 	AudioManager.play_sfx("ui_confirm")

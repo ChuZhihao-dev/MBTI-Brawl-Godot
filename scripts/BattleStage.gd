@@ -4,8 +4,10 @@ const MATCH_DURATION: float = 99.0
 
 var p1: BaseFighter
 var p2: BaseFighter
+var p2_ai: FighterAI
 var vfx: BattleVFX
 var match_time: float = MATCH_DURATION
+var match_started: bool = false
 var match_ended: bool = false
 
 @onready var camera: Camera2D = $SmashCamera2D
@@ -15,6 +17,11 @@ func _ready() -> void:
 	GameManager.is_pause_menu_open = false
 	GameManager.hitstop_timer = 0.0
 	get_tree().paused = false
+
+	# 动态阳光丁达尔光束与飘浮光尘氛围
+	var atmo := ArenaAtmosphereFX.new()
+	atmo.name = "ArenaAtmosphereFX"
+	add_child(atmo)
 
 	vfx = BattleVFX.new()
 	vfx.name = "BattleVFX"
@@ -33,6 +40,23 @@ func _ready() -> void:
 	world_env.environment = env
 	add_child(world_env)
 
+	# 天空竞技场左右上升风柱弹射跳板
+	var left_geyser := WindGeyser.new()
+	left_geyser.name = "WindGeyserLeft"
+	left_geyser.position = Vector2(275.0, 554.0)
+	add_child(left_geyser)
+
+	var right_geyser := WindGeyser.new()
+	right_geyser.name = "WindGeyserRight"
+	right_geyser.position = Vector2(1525.0, 554.0)
+	add_child(right_geyser)
+
+	# 中央顶层悬浮台随机道具与定时炸弹刷新器
+	var spawner := ArenaItemSpawner.new()
+	spawner.name = "ArenaItemSpawner"
+	spawner.spawn_position = Vector2(900.0, 244.0)
+	add_child(spawner)
+
 	var p1_pos := Vector2(580.0, 550.0)
 	var p2_pos := Vector2(1210.0, 550.0)
 	var old_p1 := get_node_or_null("P1")
@@ -49,10 +73,40 @@ func _ready() -> void:
 	p1 = _spawn_fighter(GameManager.selected_p1, 1, p1_pos)
 	p2 = _spawn_fighter(GameManager.selected_p2, 2, p2_pos)
 
+	if GameManager.battle_mode == "ai":
+		p2_ai = FighterAI.new()
+		p2_ai.name = "P2_AI"
+		add_child(p2_ai)
+		p2_ai.setup(p2, p1, GameManager.ai_difficulty)
+
 	if camera and camera.has_method("set_targets"):
 		camera.set_targets(p1, p2)
 	if hud and hud.has_method("bind_fighters"):
 		hud.bind_fighters(p1, p2)
+
+	# 开场 READY... FIGHT! 仪式感
+	_play_round_intro()
+
+func _play_round_intro() -> void:
+	match_started = false
+	if p1:
+		p1.battle_locked = true
+	if p2:
+		p2.battle_locked = true
+	if hud and hud.has_method("play_round_intro"):
+		hud.play_round_intro(func() -> void:
+			match_started = true
+			if is_instance_valid(p1) and not match_ended:
+				p1.battle_locked = false
+			if is_instance_valid(p2) and not match_ended:
+				p2.battle_locked = false
+		)
+	else:
+		match_started = true
+		if p1:
+			p1.battle_locked = false
+		if p2:
+			p2.battle_locked = false
 
 func _spawn_fighter(fid: String, player_idx: int, spawn_pos: Vector2) -> BaseFighter:
 	var scene: PackedScene = GameManager.get_fighter_scene(fid)
@@ -76,7 +130,7 @@ func _spawn_fighter(fid: String, player_idx: int, spawn_pos: Vector2) -> BaseFig
 	return fighter
 
 func _process(delta: float) -> void:
-	if match_ended:
+	if match_ended or not match_started:
 		return
 	match_time = maxf(0.0, match_time - delta)
 	if hud and hud.has_method("set_timer_value"):

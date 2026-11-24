@@ -40,7 +40,7 @@ bg_rect_path = NodePath("../BgImage")
 layout_mode = 0
 offset_left = 32.0
 offset_top = 24.0
-offset_right = 360.0
+offset_right = 560.0
 offset_bottom = 70.0
 theme_override_constants/separation = 10
 
