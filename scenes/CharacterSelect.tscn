@@ -1,0 +1,196 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/CharacterSelect.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/ui/select_bg.jpg" id="2_bg"]
+[ext_resource type="Script" path="res://scripts/SelectStageFX.gd" id="3_fx"]
+
+[node name="CharacterSelect" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="BgImage" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="StageFX" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("3_fx")
+p1_spotlight_path = NodePath("../P1Spotlight")
+p2_spotlight_path = NodePath("../P2Spotlight")
+bg_rect_path = NodePath("../BgImage")
+
+[node name="TopTools" type="HBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 24.0
+offset_right = 360.0
+offset_bottom = 70.0
+theme_override_constants/separation = 10
+
+[node name="P1SlotBtn" type="Button" parent="TopTools"]
+custom_minimum_size = Vector2(78, 42)
+layout_mode = 2
+text = "1P"
+
+[node name="P2SlotBtn" type="Button" parent="TopTools"]
+custom_minimum_size = Vector2(78, 42)
+layout_mode = 2
+text = "2P"
+
+[node name="RandomBtn" type="Button" parent="TopTools"]
+custom_minimum_size = Vector2(104, 42)
+layout_mode = 2
+text = "🎲 随机"
+
+[node name="P1Panel" type="PanelContainer" parent="."]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 86.0
+offset_right = 350.0
+offset_bottom = 216.0
+
+[node name="VBox" type="VBoxContainer" parent="P1Panel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="NameLabel" type="Label" parent="P1Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "1P  INTJ"
+
+[node name="TitleLabel" type="Label" parent="P1Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "建筑师 · 紫老头"
+
+[node name="StatsLabel" type="Label" parent="P1Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "HP 120 · 移速 280 · 跳跃 600"
+
+[node name="P2Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -350.0
+offset_top = 86.0
+offset_right = -32.0
+offset_bottom = 216.0
+grow_horizontal = 0
+
+[node name="VBox" type="VBoxContainer" parent="P2Panel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="NameLabel" type="Label" parent="P2Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "2P  INFJ"
+
+[node name="TitleLabel" type="Label" parent="P2Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "提倡者 · 绿老头"
+
+[node name="StatsLabel" type="Label" parent="P2Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "HP 105 · 移速 310 · 跳跃 640"
+
+[node name="P1Spotlight" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 340.0
+offset_top = 320.0
+offset_right = 680.0
+offset_bottom = 660.0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="P2Spotlight" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = 1240.0
+offset_top = 320.0
+offset_right = 1580.0
+offset_bottom = 660.0
+expand_mode = 1
+stretch_mode = 5
+flip_h = true
+
+[node name="VSLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -50.0
+offset_top = -95.0
+offset_right = 50.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.0588235, 0.0901961, 0.164706, 1)
+theme_override_font_sizes/font_size = 54
+text = "VS"
+horizontal_alignment = 1
+
+[node name="BottomDock" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -222.0
+offset_right = -24.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="RosterRow" type="HBoxContainer" parent="BottomDock"]
+layout_mode = 2
+theme_override_constants/separation = 22
+alignment = 1
+
+[node name="Actions" type="HBoxContainer" parent="BottomDock"]
+layout_mode = 2
+theme_override_constants/separation = 18
+alignment = 1
+
+[node name="BackBtn" type="Button" parent="BottomDock/Actions"]
+custom_minimum_size = Vector2(150, 46)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "返回封面"
+
+[node name="StartFightBtn" type="Button" parent="BottomDock/Actions"]
+custom_minimum_size = Vector2(190, 46)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "开始对决"
+
+[connection signal="pressed" from="TopTools/P1SlotBtn" to="." method="_on_p1_slot_pressed"]
+[connection signal="pressed" from="TopTools/P2SlotBtn" to="." method="_on_p2_slot_pressed"]
+[connection signal="pressed" from="TopTools/RandomBtn" to="." method="_on_random_pressed"]
+[connection signal="pressed" from="BottomDock/Actions/BackBtn" to="." method="_on_back_pressed"]
+[connection signal="pressed" from="BottomDock/Actions/StartFightBtn" to="." method="_on_start_fight_pressed"]

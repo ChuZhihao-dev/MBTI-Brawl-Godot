@@ -1,0 +1,133 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Texture2D" path="res://assets/stages/sky_colosseum.jpg" id="1_bg"]
+[ext_resource type="PackedScene" path="res://scenes/BaseFighter.tscn" id="2_fighter"]
+[ext_resource type="Script" path="res://scripts/SmashCamera2D.gd" id="3_cam"]
+[ext_resource type="Script" path="res://scripts/BattleHUD.gd" id="4_hud"]
+[ext_resource type="Texture2D" path="res://assets/fighters/isfp/concept/portrait.png" id="5_isfp"]
+[ext_resource type="Script" path="res://scripts/BattleStage.gd" id="6_stage"]
+
+[sub_resource type="RectangleShape2D" id="Rect_ground"]
+size = Vector2(1420, 48)
+
+[sub_resource type="RectangleShape2D" id="Rect_plat_left"]
+size = Vector2(312, 16)
+
+[sub_resource type="RectangleShape2D" id="Rect_plat_right"]
+size = Vector2(312, 16)
+
+[sub_resource type="RectangleShape2D" id="Rect_plat_top"]
+size = Vector2(314, 16)
+
+[node name="BattleStage" type="Node2D"]
+script = ExtResource("6_stage")
+
+[node name="Background" type="TextureRect" parent="."]
+offset_right = 1800.0
+offset_bottom = 770.0
+texture = ExtResource("1_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="MainGround" type="StaticBody2D" parent="."]
+position = Vector2(900, 580)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="MainGround"]
+shape = SubResource("Rect_ground")
+
+[node name="PlatformLeft" type="StaticBody2D" parent="."]
+position = Vector2(561, 412)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformLeft"]
+shape = SubResource("Rect_plat_left")
+one_way_collision = true
+
+[node name="PlatformRight" type="StaticBody2D" parent="."]
+position = Vector2(1232, 412)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformRight"]
+shape = SubResource("Rect_plat_right")
+one_way_collision = true
+
+[node name="PlatformTop" type="StaticBody2D" parent="."]
+position = Vector2(900, 282)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformTop"]
+shape = SubResource("Rect_plat_top")
+one_way_collision = true
+
+[node name="P1" parent="." instance=ExtResource("2_fighter")]
+position = Vector2(580, 550)
+player_index = 1
+fighter_name = "ENFJ"
+theme_color = Color(0.0627451, 0.72549, 0.505882, 1)
+
+[node name="P2" parent="." instance=ExtResource("2_fighter")]
+position = Vector2(1210, 550)
+player_index = 2
+fighter_name = "ISFP"
+theme_color = Color(0.960784, 0.619608, 0.0431373, 1)
+portrait_texture = ExtResource("5_isfp")
+
+[node name="SmashCamera2D" type="Camera2D" parent="."]
+position = Vector2(900, 440)
+script = ExtResource("3_cam")
+p1_path = NodePath("../P1")
+p2_path = NodePath("../P2")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("4_hud")
+p1_path = NodePath("../P1")
+p2_path = NodePath("../P2")
+
+[node name="TopBar" type="HBoxContainer" parent="HUD"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 36.0
+offset_top = 24.0
+offset_right = -36.0
+offset_bottom = 110.0
+grow_horizontal = 2
+theme_override_constants/separation = 32
+
+[node name="P1Box" type="VBoxContainer" parent="HUD/TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="P1Label" type="Label" parent="HUD/TopBar/P1Box"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.0588235, 0.0901961, 0.164706, 1)
+theme_override_font_sizes/font_size = 24
+text = "1P ENFJ"
+
+[node name="P1HP" type="ProgressBar" parent="HUD/TopBar/P1Box"]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+value = 100.0
+show_percentage = false
+
+[node name="BackBtn" type="Button" parent="HUD/TopBar"]
+custom_minimum_size = Vector2(130, 44)
+layout_mode = 2
+size_flags_vertical = 4
+text = "返回选人"
+
+[node name="P2Box" type="VBoxContainer" parent="HUD/TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="P2Label" type="Label" parent="HUD/TopBar/P2Box"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.0588235, 0.0901961, 0.164706, 1)
+theme_override_font_sizes/font_size = 24
+text = "ISFP 2P"
+horizontal_alignment = 2
+
+[node name="P2HP" type="ProgressBar" parent="HUD/TopBar/P2Box"]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+value = 100.0
+fill_mode = 1
+show_percentage = false
+
+[connection signal="pressed" from="HUD/TopBar/BackBtn" to="HUD" method="_on_back_cover_pressed"]

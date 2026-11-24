@@ -1,0 +1,27 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/BaseFighter.gd" id="1_script"]
+[ext_resource type="Shader" path="res://shaders/cutout_white.gdshader" id="2_shader"]
+[ext_resource type="Texture2D" path="res://assets/fighters/enfj/concept/portrait.png" id="3_tex"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_flash"]
+resource_local_to_scene = true
+shader = ExtResource("2_shader")
+shader_parameter/flash_amount = 0.0
+shader_parameter/flash_color = Color(1, 1, 1, 1)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(48, 96)
+
+[node name="BaseFighter" type="CharacterBody2D" groups=["fighters"]]
+script = ExtResource("1_script")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+material = SubResource("ShaderMaterial_flash")
+position = Vector2(0, -64)
+scale = Vector2(0.13, 0.13)
+texture = ExtResource("3_tex")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -48)
+shape = SubResource("RectangleShape2D_body")
