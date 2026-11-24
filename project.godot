@@ -23,6 +23,15 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 GameManager="*res://scripts/GameManager.gd"
 AudioManager="*res://scripts/AudioManager.gd"
 
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
 [input]
 
 p1_left={
@@ -138,3 +147,7 @@ p2_ult={
 2d_physics/layer_2="Fighter_Body"
 2d_physics/layer_3="Hitbox"
 2d_physics/layer_4="Hurtbox"
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0

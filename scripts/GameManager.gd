@@ -4,11 +4,14 @@ const SETTINGS_PATH: String = "user://settings.cfg"
 
 var selected_p1: String = "enfj"
 var selected_p2: String = "infj"
+var battle_mode: String = "pvp" # "pvp" 或 "ai"
+var ai_difficulty: String = "normal" # "normal" 或 "hard"
 var hitstop_timer: float = 0.0
 var is_pause_menu_open: bool = false
 
 signal camera_shake_requested(intensity: float, duration: float, dir: Vector2)
 signal keybindings_changed()
+signal combo_updated(attacker_index: int, combo_count: int, total_damage: int)
 
 const ACTION_META: Array[Dictionary] = [
 	{"suffix": "left", "label": "向左移动"},
@@ -67,7 +70,8 @@ const ROSTER: Array[Dictionary] = [
 
 const FIGHTER_SCENES: Dictionary = {
 	"enfj": "res://scenes/ENFJ.tscn",
-	"isfp": "res://scenes/ISFP.tscn"
+	"isfp": "res://scenes/ISFP.tscn",
+	"infj": "res://scenes/INFJ.tscn"
 }
 
 # 已有精灵表角色的切帧配置（后续新增角色或导出 avatar_sheet.png 只需在此登记即可自动生效）
@@ -106,7 +110,7 @@ const SPRITE_SHEETS: Dictionary = {
 		"hit": {"path": "res://assets/fighters/isfp/frames/hit_sheet.png", "cols": 2, "rows": 1, "start": 0, "frames": 2, "fps": 10.0, "loop": false}
 	},
 	"infj": {
-		"idle": {"path": "res://assets/fighters/infj/frames/idle_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 7.0, "loop": true},
+		"idle": {"path": "res://assets/fighters/infj/frames/v2/idle_sheet.png", "cols": 8, "rows": 1, "start": 0, "frames": 8, "fps": 6.0, "loop": true},
 		"walk": {"path": "res://assets/fighters/infj/frames/walk_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 11.0, "loop": true},
 		"jump": {"path": "res://assets/fighters/infj/frames/jump_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 9.0, "loop": false},
 		"light": {"path": "res://assets/fighters/infj/frames/attack_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 15.0, "loop": false},

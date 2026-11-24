@@ -10,6 +10,8 @@ var _breath_elapsed: float = 0.0
 @onready var p1_btn: Button = $TopTools/P1SlotBtn
 @onready var p2_btn: Button = $TopTools/P2SlotBtn
 @onready var random_btn: Button = $TopTools/RandomBtn
+@onready var top_tools: HBoxContainer = $TopTools
+var _mode_btn: Button
 @onready var back_btn: Button = $BottomDock/Actions/BackBtn
 @onready var start_fight_btn: Button = $BottomDock/Actions/StartFightBtn
 @onready var p1_panel: PanelContainer = $P1Panel
@@ -44,8 +46,42 @@ func _ready() -> void:
 	UIStyle.style_secondary_btn(back_btn)
 	UIStyle.style_primary_btn(start_fight_btn, true)
 
+	_mode_btn = Button.new()
+	_mode_btn.custom_minimum_size = Vector2(168, 42)
+	_mode_btn.pressed.connect(_on_mode_toggle_pressed)
+	top_tools.add_child(_mode_btn)
+	_refresh_mode_btn()
+
 	_build_faction_roster()
 	_refresh_ui(0)
+
+func _refresh_mode_btn() -> void:
+	if _mode_btn == null:
+		return
+	if GameManager.battle_mode == "ai":
+		var diff_s := "困难" if GameManager.ai_difficulty == "hard" else "普通"
+		_mode_btn.text = "模式：AI（%s）" % diff_s
+		UIStyle.style_secondary_btn(_mode_btn, Color("#059669") if GameManager.ai_difficulty == "normal" else Color("#d97706"))
+	else:
+		_mode_btn.text = "模式：双人 2P"
+		UIStyle.style_secondary_btn(_mode_btn, Color("#1e293b"))
+
+func _on_mode_toggle_pressed() -> void:
+	AudioManager.play_sfx("ui_click")
+	if GameManager.battle_mode == "pvp":
+		GameManager.battle_mode = "ai"
+		GameManager.ai_difficulty = "normal"
+	elif GameManager.ai_difficulty == "normal":
+		GameManager.ai_difficulty = "hard"
+	else:
+		GameManager.battle_mode = "pvp"
+	_refresh_mode_btn()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		var kev := event as InputEventKey
+		if kev.keycode == KEY_ENTER or kev.keycode == KEY_SPACE:
+			_on_start_fight_pressed()
 
 func _build_faction_roster() -> void:
 	_card_buttons.clear()
@@ -77,7 +113,8 @@ func _build_faction_roster() -> void:
 				continue
 			var fid: String = String(meta["id"])
 			var btn := Button.new()
-			btn.custom_minimum_size = Vector2(88, 106)
+			btn.custom_minimum_size = Vector2(78, 98)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			btn.text = String(meta["name"])
 			btn.icon = GameManager.get_portrait_texture(fid)
 			btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -91,6 +128,7 @@ func _build_faction_roster() -> void:
 		roster_row.add_child(group_box)
 
 func _on_fighter_picked(fid: String) -> void:
+	AudioManager.play_sfx("ui_confirm", -5.0, 1.08)
 	if active_slot == 1:
 		GameManager.selected_p1 = fid
 	else:
@@ -139,6 +177,9 @@ func _setup_spotlight_visual(slot: int, portrait_rect: TextureRect, fid: String)
 	if not sheet_cfg.is_empty() and ResourceLoader.exists(String(sheet_cfg["path"])):
 		var tex: Texture2D = load(String(sheet_cfg["path"])) as Texture2D
 		if tex:
+			if portrait_rect.material is ShaderMaterial:
+				var p_low: String = String(sheet_cfg["path"]).to_lower()
+				(portrait_rect.material as ShaderMaterial).set_shader_parameter("enable_white_key", 1.0 if (p_low.ends_with(".jpg") or p_low.ends_with(".jpeg")) else 0.0)
 			var atlas := AtlasTexture.new()
 			atlas.atlas = tex
 			var cols: int = int(sheet_cfg["cols"])
@@ -160,6 +201,8 @@ func _setup_spotlight_visual(slot: int, portrait_rect: TextureRect, fid: String)
 			return
 
 	_spot_anims[slot] = {}
+	if portrait_rect.material is ShaderMaterial:
+		(portrait_rect.material as ShaderMaterial).set_shader_parameter("enable_white_key", 0.0)
 	portrait_rect.texture = GameManager.get_portrait_texture(fid)
 
 func _process(delta: float) -> void:
@@ -169,9 +212,9 @@ func _process(delta: float) -> void:
 	p1_portrait.pivot_offset = Vector2(p1_portrait.size.x * 0.5, p1_portrait.size.y)
 	p2_portrait.pivot_offset = Vector2(p2_portrait.size.x * 0.5, p2_portrait.size.y)
 	if p1_portrait.scale.length() < 1.55:
-		p1_portrait.scale = Vector2(b_sx, b_sy)
+		p1_portrait.scale = Vector2(b_sx, b_sy) if (_spot_anims.get(1, {}) as Dictionary).is_empty() else Vector2.ONE
 	if p2_portrait.scale.length() < 1.55:
-		p2_portrait.scale = Vector2(b_sx, b_sy)
+		p2_portrait.scale = Vector2(b_sx, b_sy) if (_spot_anims.get(2, {}) as Dictionary).is_empty() else Vector2.ONE
 
 	for slot_key in [1, 2]:
 		var pr: FighterRig = _spot_rigs.get(slot_key, null) as FighterRig
@@ -242,19 +285,24 @@ func _refresh_ui(animate_slot: int = 0) -> void:
 		btn.add_theme_color_override("font_hover_color", card_col)
 
 func _on_p1_slot_pressed() -> void:
+	AudioManager.play_sfx("ui_click")
 	active_slot = 1
 	_refresh_ui(0)
 
 func _on_p2_slot_pressed() -> void:
+	AudioManager.play_sfx("ui_click")
 	active_slot = 2
 	_refresh_ui(0)
 
 func _on_random_pressed() -> void:
+	AudioManager.play_sfx("ui_click")
 	var pick: Dictionary = GameManager.ROSTER[randi() % GameManager.ROSTER.size()]
 	_on_fighter_picked(String(pick["id"]))
 
 func _on_back_pressed() -> void:
+	AudioManager.play_sfx("ui_click")
 	get_tree().change_scene_to_file("res://scenes/Cover.tscn")
 
 func _on_start_fight_pressed() -> void:
+	AudioManager.play_sfx("ui_confirm")
 	get_tree().change_scene_to_file("res://scenes/BattleStage.tscn")

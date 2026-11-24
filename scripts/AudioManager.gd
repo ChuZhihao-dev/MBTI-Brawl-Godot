@@ -67,6 +67,13 @@ func _build_all_sfx() -> void:
 	_streams["ko"] = _gen_ko_gong(0.85)
 	_streams["ui_click"] = _gen_chime(0.06, 620.0, 740.0, 0.25)
 	_streams["ui_confirm"] = _gen_chime(0.12, 540.0, 810.0, 0.32)
+	_streams["parry"] = _gen_chime(0.28, 1046.5, 1568.0, 0.65)
+	_streams["jump_double"] = _gen_whoosh(0.12, 340.0, 880.0, 0.38)
+	_streams["wind_boost"] = _gen_whoosh(0.32, 240.0, 960.0, 0.55)
+	_streams["item_pickup"] = _gen_chime(0.24, 587.3, 1174.6, 0.52)
+	_streams["bomb_explode"] = _gen_hit(0.42, 135.0, 32.0, 0.96)
+	_streams["round_ready"] = _gen_chime(0.22, 440.0, 554.37, 0.45)
+	_streams["round_fight"] = _gen_ultimate(0.38)
 
 func _pack_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	var wav := AudioStreamWAV.new()

@@ -30,6 +30,11 @@ func _get_attack_speed_mult() -> float:
 func _get_melee_range_bonus() -> float:
 	return 28.0 if aura_buff_timer > 0.0 else 0.0
 
+func get_active_buff_status() -> String:
+	if aura_buff_timer > 0.0:
+		return "气焰共鸣 %.1fs" % aura_buff_timer
+	return ""
+
 func _physics_process(delta: float) -> void:
 	if aura_buff_timer > 0.0:
 		aura_buff_timer = maxf(0.0, aura_buff_timer - delta)
