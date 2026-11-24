@@ -63,13 +63,33 @@ var charge_elapsed: float = 0.0
 var charge_level: int = 1
 var charge_dir: String = "neutral"
 var _last_charge_level: int = 1
+var current_attack_damage: int = 10
+var current_attack_knockback: Vector2 = Vector2.ZERO
+var current_attack_is_ult: bool = false
+var hitbox_active_timer: float = 0.0
+
+# 记录 BaseFighter 初始默认的 Hitbox 尺寸与偏移（供未定制角色的普攻使用）
+var default_hitbox_size: Vector2 = Vector2(48.0, 40.0)
+var default_hitbox_pos: Vector2 = Vector2(40.0, -48.0)
 
 @onready var sprite: Sprite2D = $Sprite2D
+@onready var hitbox_col: CollisionShape2D = $Hitbox/CollisionShape2D
+@onready var hitbox_shape: RectangleShape2D = $Hitbox/CollisionShape2D.shape as RectangleShape2D
+
 var rig: FighterRig = null
 
 func _ready() -> void:
 	hp = max_hp
 	facing = 1 if player_index == 1 else -1
+
+	# 1. 记录在 BaseFighter 编辑器中绘制的初始 Hitbox 尺寸与位置
+	if hitbox_shape:
+		default_hitbox_size = hitbox_shape.size
+	if hitbox_col:
+		default_hitbox_pos = hitbox_col.position
+		# 确保游戏开局时 Hitbox 绝对处于关闭状态
+		hitbox_col.disabled = true
+
 	load_fighter_sprites(fighter_id)
 	_update_facing_visual()
 
@@ -199,7 +219,11 @@ func _physics_process(delta: float) -> void:
 				sprite.material.set_shader_parameter("flash_amount", 1.0 if hit_flash_timer > 0.0 else 0.0)
 			if sprite:
 				sprite.offset.x = sin(Time.get_ticks_msec() * 0.09) * 5.0 if hit_flash_timer > 0.0 else 0.0
-
+	# 攻击框生效时间倒计时，时间一到自动关闭 Hitbox
+	if hitbox_active_timer > 0.0:
+		hitbox_active_timer -= delta
+		if hitbox_active_timer <= 0.0 and hitbox_col:
+			hitbox_col.disabled = true
 	if rig != null and rig.visible:
 		rig.move_velocity = velocity
 		rig.is_grounded = is_on_floor()
@@ -478,20 +502,37 @@ func on_ultimate_cast() -> void:
 	GameManager.trigger_hitstop(0.18)
 	_perform_melee(26, Vector2(facing * 520.0, -320.0), true, 165.0, true)
 
+# 【出招时开启 Hitbox 判定】
+# custom_range <= 0 时完全保持 BaseFighter 的初始尺寸与位置不变
+# custom_range > 0 时（如 ENFJ 专属光剑），动态伸展攻击距离
 func _perform_melee(damage: int, knockback: Vector2, is_heavy: bool, custom_range: float = -1.0, is_ultimate: bool = false) -> bool:
-	var hit_any: bool = false
-	var reach: float = (custom_range if custom_range > 0.0 else (118.0 if is_heavy else 92.0)) + _get_melee_range_bonus()
-	for node in get_tree().get_nodes_in_group("fighters"):
-		if node == self or not (node is BaseFighter):
-			continue
-		var target := node as BaseFighter
-		if target.is_ko:
-			continue
-		var diff: Vector2 = target.global_position - global_position
-		if (int(signf(diff.x)) == facing or absf(diff.x) < 28.0) and absf(diff.x) < reach and absf(diff.y) < 92.0:
-			target.take_damage(damage, knockback, self, is_ultimate)
-			hit_any = true
-	return hit_any
+	current_attack_damage = damage
+	current_attack_knockback = knockback
+	current_attack_is_ult = is_ultimate
+
+	if hitbox_shape:
+		# 保证每个角色独立拥有自己的 Shape，避免互相串改
+		if not hitbox_shape.resource_local_to_scene:
+			hitbox_shape.resource_local_to_scene = true
+
+		if custom_range > 0.0:
+			# 针对指定了自定义距离的攻击（如 ENFJ 光剑）
+			hitbox_shape.size = Vector2(custom_range * 0.9, default_hitbox_size.y if not is_heavy else default_hitbox_size.y * 1.4)
+			if hitbox_col:
+				hitbox_col.position = Vector2(custom_range * 0.55, default_hitbox_pos.y)
+		else:
+			# 未指定自定义距离时：100% 严格保持 BaseFighter 初始配置的默认大小与位置
+			hitbox_shape.size = default_hitbox_size
+			if hitbox_col:
+				hitbox_col.position = default_hitbox_pos
+
+	if hitbox_col:
+		hitbox_col.disabled = false  # 仅在按下攻击键时开启！
+
+	# 攻击判定窗口：持续 0.12s ~ 0.18s，时间一到由 _physics_process 自动关闭
+	hitbox_active_timer = 0.18 if (is_heavy or is_ultimate) else 0.12
+
+	return true
 
 func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false) -> void:
 	if is_ko or invincible_timer > 0.0:
@@ -553,6 +594,9 @@ func _update_facing_visual() -> void:
 		rig.set_facing(facing)
 	if sprite:
 		sprite.flip_h = facing < 0
+		# 新增：让攻击框 Hitbox 跟着人物朝向左右翻转！
+	if has_node("Hitbox"):
+		$Hitbox.scale.x = facing
 
 func _draw() -> void:
 	# 脚底实时接地阴影（让 2D 角色稳稳踩在石质竞技场上）
@@ -598,3 +642,11 @@ func _draw() -> void:
 	if charging_slot != "" and not is_ko:
 		var col := Color("#facc15") if charge_level >= 3 else (Color("#38bdf8") if charge_level == 2 else theme_color)
 		draw_arc(Vector2(0.0, -48.0), 46.0, 0.0, TAU * minf(1.0, charge_elapsed / 1.05), 24, col, 4.0)
+
+
+func _on_hitbox_area_entered(area: Area2D) -> void:
+	var target = area.owner
+	if target != self and target is BaseFighter and not target.is_ko:
+		target.take_damage(current_attack_damage, current_attack_knockback, self, current_attack_is_ult)
+		if hitbox_col:
+			hitbox_col.set_deferred("disabled", true)

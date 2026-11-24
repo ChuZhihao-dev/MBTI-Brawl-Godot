@@ -1,27 +1,59 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene format=3 uid="uid://eff02deswn0g"]
 
-[ext_resource type="Script" path="res://scripts/BaseFighter.gd" id="1_script"]
-[ext_resource type="Shader" path="res://shaders/cutout_white.gdshader" id="2_shader"]
-[ext_resource type="Texture2D" path="res://assets/fighters/enfj/concept/portrait.png" id="3_tex"]
+[ext_resource type="Script" uid="uid://brcim5vn27w46" path="res://scripts/BaseFighter.gd" id="1_script"]
+[ext_resource type="Shader" uid="uid://bfwumpjugyb4d" path="res://shaders/cutout_white.gdshader" id="2_shader"]
+[ext_resource type="Texture2D" uid="uid://ce8v2bdn81tb7" path="res://assets/fighters/enfj/concept/portrait.png" id="3_tex"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_flash"]
 resource_local_to_scene = true
 shader = ExtResource("2_shader")
+shader_parameter/white_threshold = 0.93
+shader_parameter/feather = 0.06
 shader_parameter/flash_amount = 0.0
 shader_parameter/flash_color = Color(1, 1, 1, 1)
+shader_parameter/outline_strength = 0.45
+shader_parameter/outline_color = Color(0.11, 0.15, 0.22, 1)
+shader_parameter/rim_strength = 0.22
+shader_parameter/rim_color = Color(1, 0.96, 0.82, 1)
+shader_parameter/aura_glow = 0.0
+shader_parameter/aura_color = Color(0.28, 0.94, 0.62, 1)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 96)
 
-[node name="BaseFighter" type="CharacterBody2D" groups=["fighters"]]
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_p40vi"]
+size = Vector2(67, 132)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_tq0ge"]
+size = Vector2(47.5, 133)
+
+[node name="BaseFighter" type="CharacterBody2D" unique_id=553821351 groups=["fighters"]]
 script = ExtResource("1_script")
 
-[node name="Sprite2D" type="Sprite2D" parent="."]
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=1245190093]
 material = SubResource("ShaderMaterial_flash")
 position = Vector2(0, -64)
 scale = Vector2(0.13, 0.13)
 texture = ExtResource("3_tex")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=2028433358]
 position = Vector2(0, -48)
 shape = SubResource("RectangleShape2D_body")
+
+[node name="Hurtbox" type="Area2D" parent="." unique_id=365021118]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Hurtbox" unique_id=1525114510]
+position = Vector2(-0.5, -65)
+shape = SubResource("RectangleShape2D_p40vi")
+
+[node name="Hitbox" type="Area2D" parent="." unique_id=752257139]
+collision_layer = 0
+collision_mask = 8
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Hitbox" unique_id=1669765773]
+position = Vector2(42.75, -66)
+shape = SubResource("RectangleShape2D_tq0ge")
+
+[connection signal="area_entered" from="Hitbox" to="." method="_on_hitbox_area_entered"]
