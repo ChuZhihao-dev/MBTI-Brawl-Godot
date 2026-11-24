@@ -2,16 +2,12 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ctg1dgd6la55h"
-path="res://.godot/imported/attack_sheet.png-30ba7acc914aea43f282c73d8fb79a63.ctex"
-metadata={
-"vram_texture": false
-}
+uid="uid://b33eg43g4nvtb"
+valid=false
 
 [deps]
 
 source_file="res://assets/fighters/infj/frames/attack_sheet.png"
-dest_files=["res://.godot/imported/attack_sheet.png-30ba7acc914aea43f282c73d8fb79a63.ctex"]
 
 [params]
 

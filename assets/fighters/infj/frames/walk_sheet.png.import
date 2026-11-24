@@ -2,16 +2,12 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b05gjelrj5f3r"
-path="res://.godot/imported/walk_sheet.png-94992c0126a8cc63d413827e615b0f89.ctex"
-metadata={
-"vram_texture": false
-}
+uid="uid://dm86dwuwo3qkn"
+valid=false
 
 [deps]
 
 source_file="res://assets/fighters/infj/frames/walk_sheet.png"
-dest_files=["res://.godot/imported/walk_sheet.png-94992c0126a8cc63d413827e615b0f89.ctex"]
 
 [params]
 
