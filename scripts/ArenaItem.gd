@@ -3,18 +3,40 @@ class_name ArenaItem
 
 enum Kind { ENERGY_CRYSTAL, HEAL_FRUIT, TIME_BOMB }
 
+const ITEM_TEXTURES: Dictionary = {
+	Kind.ENERGY_CRYSTAL: "res://assets/items/energy_crystal.png",
+	Kind.HEAL_FRUIT: "res://assets/items/heal_fruit.png",
+	Kind.TIME_BOMB: "res://assets/items/time_bomb.png"
+}
+
 var kind: Kind = Kind.ENERGY_CRYSTAL
 var _elapsed: float = 0.0
 var _bomb_fuse: float = 3.8
 var _consumed: bool = false
+var _sprite: Sprite2D
+var _base_scale: float = 1.0
 
 func _ready() -> void:
 	z_index = 22
 	add_to_group("arena_items")
+	_setup_sprite()
 	var vfx := BattleVFX.get_current(get_tree())
 	if vfx:
-		var col := _get_color()
-		vfx.spawn_shockwave_ring(global_position, col, 10.0, 76.0, 0.30, 4.0)
+		vfx.spawn_shockwave_ring(global_position, _get_color(), 10.0, 76.0, 0.30, 4.0)
+
+func _setup_sprite() -> void:
+	var path: String = String(ITEM_TEXTURES.get(kind, ""))
+	if path == "" or not ResourceLoader.exists(path):
+		return
+	var tex: Texture2D = load(path) as Texture2D
+	if tex == null:
+		return
+	_sprite = Sprite2D.new()
+	_sprite.texture = tex
+	var target_h: float = 58.0 if kind == Kind.ENERGY_CRYSTAL else 54.0
+	_base_scale = target_h / maxf(1.0, tex.get_size().y)
+	_sprite.scale = Vector2(_base_scale, _base_scale)
+	add_child(_sprite)
 
 func _get_color() -> Color:
 	match kind:
@@ -39,6 +61,19 @@ func _physics_process(delta: float) -> void:
 	elif _elapsed >= 13.0:
 		queue_free()
 		return
+
+	if _sprite:
+		var bob: float = sin(_elapsed * 4.5) * 6.0
+		_sprite.position.y = bob
+		if kind == Kind.TIME_BOMB:
+			var flash_spd: float = 18.0 if _bomb_fuse < 1.4 else 7.5
+			var pulse: float = 0.5 + 0.5 * sin(_elapsed * flash_spd)
+			var sc: float = _base_scale * (1.0 + pulse * (0.14 if _bomb_fuse < 1.4 else 0.06))
+			_sprite.scale = Vector2(sc, sc)
+			_sprite.modulate = Color(1.0, 0.45, 0.35, 1.0) if (pulse > 0.65 and _bomb_fuse < 1.6) else Color.WHITE
+		else:
+			var sc2: float = _base_scale * (1.0 + sin(_elapsed * 3.8) * 0.04)
+			_sprite.scale = Vector2(sc2, sc2)
 
 	for node in get_tree().get_nodes_in_group("fighters"):
 		if not (node is BaseFighter):
@@ -104,30 +139,8 @@ func _draw() -> void:
 	var bob: float = sin(_elapsed * 4.5) * 6.0
 	var pos := Vector2(0.0, bob)
 	var col := _get_color()
-	# 外圈柔光环
-	draw_arc(pos, 26.0 + sin(_elapsed * 6.0) * 3.0, 0.0, TAU, 24, Color(col.r, col.g, col.b, 0.65), 3.0, true)
-
-	match kind:
-		Kind.ENERGY_CRYSTAL:
-			# 菱形能量水晶
-			var pts := PackedVector2Array([
-				pos + Vector2(0.0, -20.0),
-				pos + Vector2(14.0, 0.0),
-				pos + Vector2(0.0, 20.0),
-				pos + Vector2(-14.0, 0.0)
-			])
-			draw_colored_polygon(pts, Color("#38bdf8"))
-			draw_colored_polygon(PackedVector2Array([pos + Vector2(0.0, -14.0), pos + Vector2(7.0, 0.0), pos + Vector2(0.0, 12.0), pos + Vector2(-5.0, 0.0)]), Color("#e0f2fe"))
-		Kind.HEAL_FRUIT:
-			# 翡翠生命圣果 + 叶片
-			draw_circle(pos + Vector2(0.0, 2.0), 15.0, Color("#22c55e"))
-			draw_circle(pos + Vector2(-4.0, -2.0), 6.0, Color("#bbf7d0"))
-			draw_colored_polygon(PackedVector2Array([pos + Vector2(0.0, -12.0), pos + Vector2(12.0, -22.0), pos + Vector2(4.0, -10.0)]), Color("#86efac"))
-		Kind.TIME_BOMB:
-			# 闪烁定时炸弹
-			var flash_spd: float = 16.0 if _bomb_fuse < 1.3 else 7.0
-			var blink: bool = sin(_elapsed * flash_spd) > 0.0
-			draw_circle(pos + Vector2(0.0, 2.0), 16.0, Color("#ef4444") if blink else Color("#1e293b"))
-			draw_arc(pos + Vector2(0.0, 2.0), 16.0, 0.0, TAU, 20, Color("#fde047"), 2.5, true)
-			draw_line(pos + Vector2(0.0, -14.0), pos + Vector2(8.0, -24.0), Color("#fbbf24"), 3.0)
-			draw_circle(pos + Vector2(9.0, -25.0), 4.5, Color("#fef08a") if blink else Color("#f97316"))
+	# 柔和外围脉冲光环（烘托道具可拾取/危险高亮感）
+	var ring_a: float = 0.72 if (kind == Kind.TIME_BOMB and _bomb_fuse < 1.4) else 0.45
+	draw_arc(pos, 32.0 + sin(_elapsed * 6.0) * 3.0, 0.0, TAU, 28, Color(col.r, col.g, col.b, ring_a), 2.5, true)
+	if _sprite == null:
+		draw_circle(pos, 14.0, col)
