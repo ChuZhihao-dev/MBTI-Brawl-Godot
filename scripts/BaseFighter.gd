@@ -44,6 +44,8 @@ var dash_cd: float = 0.0
 var dash_dir: int = 1
 var dash_ghost_timer: float = 0.0
 var invincible_timer: float = 0.0
+var super_armor_timer: float = 0.0
+var can_hit_cancel: bool = false
 var hitstun_timer: float = 0.0
 var hit_flash_timer: float = 0.0
 var block_hit_timer: float = 0.0
@@ -260,7 +262,16 @@ func _advance_anim(delta: float) -> void:
 	var total: int = maxi(1, int(cfg["frames"]))
 	var fps: float = float(cfg["fps"])
 	var raw_idx: int = int(floor(_anim_time * fps))
-	var idx: int = (raw_idx % total) if bool(cfg.get("loop", true)) else mini(total - 1, raw_idx)
+	var idx: int = 0
+	if bool(cfg.get("loop", true)):
+		var loop_start: int = clampi(int(cfg.get("loop_start", 0)), 0, total - 1)
+		if raw_idx < total:
+			idx = raw_idx
+		else:
+			var loop_len: int = maxi(1, total - loop_start)
+			idx = loop_start + ((raw_idx - loop_start) % loop_len)
+	else:
+		idx = mini(total - 1, raw_idx)
 	sprite.frame = int(cfg.get("start", 0)) + idx
 
 func _act(suffix: String) -> String:
@@ -311,11 +322,14 @@ func _physics_process(delta: float) -> void:
 	dash_cd = maxf(0.0, dash_cd - delta)
 	dash_ghost_timer = maxf(0.0, dash_ghost_timer - delta)
 	invincible_timer = maxf(0.0, invincible_timer - delta)
+	super_armor_timer = maxf(0.0, super_armor_timer - delta)
 	hitstun_timer = maxf(0.0, hitstun_timer - delta)
 	block_hit_timer = maxf(0.0, block_hit_timer - delta)
 	jump_startup_timer = maxf(0.0, jump_startup_timer - delta)
 	landing_timer = maxf(0.0, landing_timer - delta)
 	basic_cd = maxf(0.0, basic_cd - delta)
+	if basic_cd <= 0.0:
+		can_hit_cancel = false
 	skill1_cd = maxf(0.0, skill1_cd - delta)
 	skill2_cd = maxf(0.0, skill2_cd - delta)
 	action_anim_timer = maxf(0.0, action_anim_timer - delta)
@@ -527,13 +541,15 @@ func _physics_process(delta: float) -> void:
 		else:
 			velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 
-		# 5. 普攻（J/1）与重击（K/2）（带 4-6 帧 / 0.10s 预输入缓冲）
+		# 5. 普攻（J/1）与重击（K/2）（带预输入缓冲 + 命中取消重击派生）
 		var allow_light_cancel: bool = can_cancel_attack and action_anim_state == "light" and attack_buffer_timer > 0.0 and basic_cd <= 0.0
-		if (not guarding and dash_timer <= 0.0 and basic_cd <= 0.0 and attack_buffer_timer > 0.0) or allow_light_cancel:
-			if allow_light_cancel:
+		var allow_hit_heavy_cancel: bool = can_hit_cancel and attack_buffer_timer > 0.0 and attack_buffer_type == "heavy"
+		if (not guarding and dash_timer <= 0.0 and basic_cd <= 0.0 and attack_buffer_timer > 0.0) or allow_light_cancel or allow_hit_heavy_cancel:
+			if allow_light_cancel or allow_hit_heavy_cancel:
 				action_anim_timer = 0.0
 				action_anim_state = ""
 				can_cancel_attack = false
+				can_hit_cancel = false
 			attack_buffer_timer = 0.0
 			if attack_buffer_type == "light":
 				_perform_light_attack()
@@ -588,6 +604,8 @@ func _sync_animation_state() -> void:
 	var has_rig: bool = rig != null and rig.visible
 	if hitstun_timer > 0.0 and (has_rig or _sheet_textures.has("hit")):
 		_play_anim("hit")
+	elif charging_slot != "" and _sheet_textures.has(charging_slot + "_charge"):
+		_play_anim(charging_slot + "_charge")
 	elif block_hit_timer > 0.0 and (has_rig or _sheet_textures.has("block_hit")):
 		_play_anim("block_hit")
 	elif dash_timer > 0.0:
@@ -863,6 +881,20 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 			var mult: float = maxf(0.55, 1.0 - float(attacker.current_combo_hits - 1) * 0.07)
 			scaled_amount = maxi(2, int(round(float(amount) * mult)))
 
+	# 霸体状态（Super Armor）：承受 70% 伤害但不被打断硬直或击飞
+	if super_armor_timer > 0.0 and not is_ultimate:
+		var armor_dmg: int = maxi(1, int(round(float(scaled_amount) * 0.7)))
+		hp = maxi(0, hp - armor_dmg)
+		ep = minf(100.0, ep + armor_dmg * 0.9)
+		hit_flash_timer = 0.09
+		AudioManager.play_sfx("block", -3.0, 0.85)
+		if vfx:
+			vfx.spawn_hit_fx(hit_pos, Color("#fde047"), false, false)
+			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -40.0), "霸体 -%d" % armor_dmg, Color("#fde047"), 0.95)
+		if hp <= 0:
+			_trigger_ko(attacker, false)
+		return
+
 	var is_light: bool = attacker != null and attacker.action_anim_state == "light" and not is_ultimate
 	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate) and not is_light
 	hp = maxi(0, hp - scaled_amount)
@@ -924,10 +956,12 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, 38.0, Color(0.05, 0.08, 0.14, s_al))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-	if guarding and not is_ko:
+	# 仅在没有专属防御动作图时显示默认蓝色防御弧
+	if guarding and not is_ko and not _sheet_textures.has("guard"):
 		var g_col := Color("#fde047") if parry_window_timer > 0.0 else Color("#38bdf8")
 		draw_arc(Vector2(facing * 26.0, -48.0), 38.0, -0.9 if facing > 0 else PI - 0.9, 0.9 if facing > 0 else PI + 0.9, 16, g_col, 4.5 if parry_window_timer > 0.0 else 4.0)
-	if charging_slot != "" and not is_ko:
+	# 仅在没有专属蓄力动画时显示默认蓄力圆环兜底；有专属蓄力原画（如 ENFJ 的 U/I）时不遮挡人物
+	if charging_slot != "" and not is_ko and not _sheet_textures.has(charging_slot + "_charge"):
 		var col := Color("#facc15") if charge_level >= 3 else (Color("#38bdf8") if charge_level == 2 else theme_color)
 		draw_arc(Vector2(0.0, -48.0), 46.0, 0.0, TAU * minf(1.0, charge_elapsed / 1.05), 24, col, 4.0)
 

@@ -96,6 +96,8 @@ const SPRITE_SHEETS: Dictionary = {
 		"heavy_2": {"path": "res://assets/fighters/enfj/frames/reduced_v2/keyframes/heavy_attack_2_sheet.png", "cols": 5, "rows": 1, "start": 0, "frames": 5, "fps": 13.0, "loop": false},
 		"heavy_3": {"path": "res://assets/fighters/enfj/frames/reduced_v2/keyframes/heavy_attack_3_sheet.png", "cols": 5, "rows": 1, "start": 0, "frames": 5, "fps": 12.0, "loop": false},
 		"skill": {"path": "res://assets/fighters/enfj/frames/reduced_v2/triple_sword_wave_sheet.png", "cols": 10, "rows": 1, "start": 0, "frames": 10, "fps": 17.0, "loop": false},
+		"skill1_charge": {"path": "res://assets/fighters/enfj/frames/reduced_v2/skill1_charge_sheet.png", "cols": 3, "rows": 2, "start": 0, "frames": 6, "fps": 12.0, "loop": true, "loop_start": 2},
+		"skill2_charge": {"path": "res://assets/fighters/enfj/frames/reduced_v2/skill2_charge_sheet.png", "cols": 3, "rows": 2, "start": 0, "frames": 6, "fps": 12.0, "loop": true, "loop_start": 2},
 		"triple_wave": {"path": "res://assets/fighters/enfj/frames/reduced_v2/triple_sword_wave_sheet.png", "cols": 10, "rows": 1, "start": 0, "frames": 10, "fps": 17.0, "loop": false},
 		"aura_buff": {"path": "res://assets/fighters/enfj/frames/reduced_v2/aura_buff_sheet.png", "cols": 8, "rows": 1, "start": 0, "frames": 8, "fps": 20.0, "loop": false},
 		"ultimate": {"path": "res://assets/fighters/enfj/frames/reduced_v2/ultimate_clean_sheet.png", "cols": 10, "rows": 1, "start": 0, "frames": 10, "fps": 14.0, "loop": false},

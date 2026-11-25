@@ -8,6 +8,7 @@ var knockback: Vector2 = Vector2(280.0, -140.0)
 var max_lifetime: float = 0.85
 var hit_radius: float = 44.0
 var is_ultimate: bool = false
+var charge_level: int = 1
 var tint_color: Color = Color("#34d399")
 var wave_scale: float = 1.0
 
@@ -19,7 +20,11 @@ var _sprite: Sprite2D
 func _ready() -> void:
 	z_index = 25
 	_sprite = Sprite2D.new()
-	var tex_path := "res://assets/fighters/enfj/frames/reduced_v2/ultimate_projectile.png" if is_ultimate else "res://assets/fighters/enfj/frames/reduced_v2/sword_wave_projectile.png"
+	var tex_path := "res://assets/fighters/enfj/frames/reduced_v2/ultimate_projectile.png" if is_ultimate else ("res://assets/fighters/enfj/frames/reduced_v2/sword_wave_lv%d.png" % clampi(charge_level, 1, 3))
+	if not ResourceLoader.exists(tex_path):
+		tex_path = "res://assets/fighters/enfj/frames/reduced_v2/sword_wave_lv1.png"
+	if not ResourceLoader.exists(tex_path):
+		tex_path = "res://assets/fighters/enfj/frames/reduced_v2/sword_wave_projectile.png"
 	if not ResourceLoader.exists(tex_path):
 		tex_path = "res://assets/fighters/enfj/frames/sword_wave_projectile.png"
 	if ResourceLoader.exists(tex_path):
@@ -39,8 +44,12 @@ func _ready() -> void:
 	_sprite.material = add_mat
 	if is_ultimate:
 		_sprite.modulate = Color(2.1, 1.95, 0.95, 1.0)
+	elif charge_level >= 3:
+		_sprite.modulate = Color(1.85, 1.75, 0.85, 1.0)
+	elif charge_level == 2:
+		_sprite.modulate = Color(1.45, 1.65, 1.15, 0.98)
 	else:
-		_sprite.modulate = Color(tint_color.r * 1.65, tint_color.g * 1.65, tint_color.b * 1.65, 0.95)
+		_sprite.modulate = Color(tint_color.r * 1.45, tint_color.g * 1.45, tint_color.b * 1.45, 0.95)
 	add_child(_sprite)
 
 func _physics_process(delta: float) -> void:
@@ -74,6 +83,6 @@ func _physics_process(delta: float) -> void:
 		if global_position.distance_to(target_center) <= hit_radius:
 			_hit_ids[tid] = true
 			target.take_damage(damage, knockback, owner_fighter, is_ultimate)
-			if not is_ultimate:
+			if not is_ultimate and charge_level < 3:
 				queue_free()
 				return
