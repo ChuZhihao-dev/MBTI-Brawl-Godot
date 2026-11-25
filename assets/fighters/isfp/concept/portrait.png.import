@@ -2,12 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c4f4865i1ut60"
-valid=false
+uid="uid://1f4hajsy1wax"
+path="res://.godot/imported/portrait.png-b1ec238cbd6376b9aeccb71f8f9456d0.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/fighters/isfp/concept/portrait.png"
+dest_files=["res://.godot/imported/portrait.png-b1ec238cbd6376b9aeccb71f8f9456d0.ctex"]
 
 [params]
 

@@ -2,12 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bnsuss1gnxx2m"
-valid=false
+uid="uid://ccxj8cvj6rwq8"
+path="res://.godot/imported/jump_sheet.png-c05b146e2021d1d232d86cb18aa7a3c1.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/fighters/isfp/frames/jump_sheet.png"
+dest_files=["res://.godot/imported/jump_sheet.png-c05b146e2021d1d232d86cb18aa7a3c1.ctex"]
 
 [params]
 

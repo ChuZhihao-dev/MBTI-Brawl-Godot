@@ -2,12 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://l7n8mbfijaef"
-valid=false
+uid="uid://brrwq0v6u5huk"
+path="res://.godot/imported/hit_sheet.png-c308a36438cf3fc29e82bf16bebf4302.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/fighters/isfp/frames/hit_sheet.png"
+dest_files=["res://.godot/imported/hit_sheet.png-c308a36438cf3fc29e82bf16bebf4302.ctex"]
 
 [params]
 

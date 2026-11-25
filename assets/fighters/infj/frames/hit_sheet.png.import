@@ -2,12 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c7kjrdkdiwdo0"
-valid=false
+uid="uid://boxpeexxe5ji"
+path="res://.godot/imported/hit_sheet.png-036604d3d1da4809a2dee4dc3fed646a.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/fighters/infj/frames/hit_sheet.png"
+dest_files=["res://.godot/imported/hit_sheet.png-036604d3d1da4809a2dee4dc3fed646a.ctex"]
 
 [params]
 

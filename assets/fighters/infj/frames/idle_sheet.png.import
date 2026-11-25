@@ -2,12 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cyf12xewrrsf6"
-valid=false
+uid="uid://ct7erlmrixu0o"
+path="res://.godot/imported/idle_sheet.png-5b524cdf7e345b1ae824a5b1e87d8a87.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/fighters/infj/frames/idle_sheet.png"
+dest_files=["res://.godot/imported/idle_sheet.png-5b524cdf7e345b1ae824a5b1e87d8a87.ctex"]
 
 [params]
 

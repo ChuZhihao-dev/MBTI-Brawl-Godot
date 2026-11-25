@@ -299,10 +299,18 @@ func _on_random_pressed() -> void:
 	var pick: Dictionary = GameManager.ROSTER[randi() % GameManager.ROSTER.size()]
 	_on_fighter_picked(String(pick["id"]))
 
+var _transitioning: bool = false
+
 func _on_back_pressed() -> void:
+	if _transitioning:
+		return
+	_transitioning = true
 	AudioManager.play_sfx("ui_click")
 	get_tree().change_scene_to_file("res://scenes/Cover.tscn")
 
 func _on_start_fight_pressed() -> void:
+	if _transitioning:
+		return
+	_transitioning = true
 	AudioManager.play_sfx("ui_confirm")
 	get_tree().change_scene_to_file("res://scenes/BattleStage.tscn")

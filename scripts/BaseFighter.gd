@@ -51,6 +51,11 @@ var jump_startup_timer: float = 0.0
 var landing_timer: float = 0.0
 var action_anim_timer: float = 0.0
 var action_anim_state: String = ""
+var can_cancel_attack: bool = false
+var has_hit_target_in_attack: bool = false
+var light_attack_hit_registered: bool = false
+var isfp_startup_step_timer: float = 0.0
+var isfp_light_active: bool = false
 var guarding: bool = false
 var basic_cd: float = 0.0
 var skill1_cd: float = 0.0
@@ -187,14 +192,28 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 
 		# 此时 sprite.texture 已经是新动画切换后的正式图片了，再进行缩放与踩地高度校准！
 		if sprite and sprite.texture:
+			var tex_path: String = sprite.texture.resource_path.to_lower()
 			var rows: float = float(maxi(1, sprite.vframes))
 			var frame_h: float = sprite.texture.get_size().y / rows
-			# 根据是 stand.png（留白很多）还是 move.png（几乎占满）分别给最协调的比例
-			var mult: float = sprite_scale_mult if rows == 1.0 else (sprite_scale_mult * (407.0 / 724.0) / (318.0 / 362.0))
+			var mult: float = sprite_scale_mult
+			var y_off: float = sprite_y_offset
+			
+			if tex_path.ends_with("jump.png") or state_name == "jump" or state_name == "fall":
+				# jump/fall 序列帧人物实际躯干占高 ~288px，统一缩放到与 stand(407px)/move(317px) 完全一致的视觉比例！
+				mult = sprite_scale_mult * (407.0 / 288.0)
+				y_off = -17.0
+			elif rows > 1.0 or tex_path.ends_with("move.png") or tex_path.ends_with("fighter_light.png") or state_name == "walk" or state_name == "light":
+				# move.png 与 fighter_light.png 躯干高度 ~313-318px / 362px
+				mult = sprite_scale_mult * (407.0 / 724.0) / (318.0 / 362.0)
+				y_off = sprite_y_offset * 0.4
+			else:
+				# stand.png 躯干高度 407px / 724px
+				mult = sprite_scale_mult
+				y_off = sprite_y_offset
+
 			var sc: float = (target_sprite_height / maxf(1.0, frame_h)) * mult
 			_base_sprite_scale = Vector2(sc, sc)
 			sprite.scale = _base_sprite_scale
-			var y_off: float = sprite_y_offset if rows == 1.0 else (sprite_y_offset * 0.4)
 			sprite.position = Vector2(0.0, -target_sprite_height * 0.5 + y_off)
 		return
 	# ---------------------------------------------------------------
@@ -294,6 +313,28 @@ func _physics_process(delta: float) -> void:
 	skill1_cd = maxf(0.0, skill1_cd - delta)
 	skill2_cd = maxf(0.0, skill2_cd - delta)
 	action_anim_timer = maxf(0.0, action_anim_timer - delta)
+	if isfp_startup_step_timer > 0.0:
+		isfp_startup_step_timer = maxf(0.0, isfp_startup_step_timer - delta)
+		if is_on_floor() and absf(velocity.x) < 220.0:
+			velocity.x = facing * 120.0
+
+	# ---------------------------------------------------------------
+	# 普攻判定生效窗口（Active：第 7-9 帧，约 0.10s - 0.15s）与取消窗口（Cancel Window）
+	# ---------------------------------------------------------------
+	if action_anim_state == "light" and isfp_light_active:
+		var elapsed_time: float = 0.20 - action_anim_timer
+		# 第 7-9 帧（0.10s <= t <= 0.15s）：激活稳定单次攻击判定
+		if elapsed_time >= 0.10 and elapsed_time <= 0.15 and not light_attack_hit_registered:
+			_check_isfp_light_hitbox()
+		# 取消窗口：从第 8 帧（命中确认后）或后摇阶段（第 8-12 帧，t >= 0.116s）允许立即派生取消
+		if elapsed_time >= 0.116 or has_hit_target_in_attack:
+			can_cancel_attack = true
+	elif action_anim_state == "light" and has_hit_target_in_attack:
+		can_cancel_attack = true
+	elif action_anim_timer <= 0.0:
+		can_cancel_attack = false
+		isfp_light_active = false
+		light_attack_hit_registered = false
 	coyote_timer = maxf(0.0, coyote_timer - delta)
 	jump_buffer_timer = maxf(0.0, jump_buffer_timer - delta)
 	attack_buffer_timer = maxf(0.0, attack_buffer_timer - delta)
@@ -383,10 +424,21 @@ func _physics_process(delta: float) -> void:
 		ep = 0.0
 		guarding = false
 		on_ultimate_cast()
-	# 1. 蓄力小技能处理（支持方向键派生）
+	# 1. 蓄力小技能处理（支持方向键派生，或由普攻取消窗口提前中断后摇派生）
 	elif _process_charge_skill(delta, can_act, horiz, guard_held, up_held, inp):
+		if can_cancel_attack and action_anim_state == "light":
+			action_anim_timer = 0.0
+			action_anim_state = ""
+			can_cancel_attack = false
 		velocity.x = move_toward(velocity.x, 0.0, 1400.0 * delta)
 	elif can_act:
+		# 普攻后摇取消窗口：允许立即取消并衔接 dash（闪避）
+		var allow_dash_cancel: bool = can_cancel_attack and action_anim_state == "light" and bool(inp["dash_just"])
+		if allow_dash_cancel:
+			action_anim_timer = 0.0
+			action_anim_state = ""
+			can_cancel_attack = false
+
 		# 2. 单向平台下+跳快速穿落
 		if is_on_floor() and guard_held and up_pressed and global_position.y < 520.0:
 			global_position.y += 8.0
@@ -430,10 +482,19 @@ func _physics_process(delta: float) -> void:
 					else:
 						vfx.spawn_ghost(sprite, theme_color, 0.22)
 		elif not guarding:
+			# 普攻前摇阶段（Startup 第 1-6 帧）允许角色微调朝向与微量惯性移动；其余攻击动作锁死转向
+			var in_light_startup: bool = action_anim_state == "light" and isfp_light_active and (0.20 - action_anim_timer < 0.10)
+			var can_move_facing: bool = action_anim_timer <= 0.0 or in_light_startup
 			if horiz != 0.0:
-				velocity.x = horiz * eff_speed
-				facing = int(signf(horiz))
-				_update_facing_visual()
+				if can_move_facing:
+					facing = int(signf(horiz))
+					_update_facing_visual()
+				if action_anim_timer <= 0.0:
+					velocity.x = horiz * eff_speed
+				elif in_light_startup:
+					velocity.x = move_toward(velocity.x, horiz * eff_speed * 0.45, 900.0 * delta)
+				else:
+					velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 			else:
 				velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 			# 地面跳（含土狼时间 + 跳跃缓冲）
@@ -444,6 +505,7 @@ func _physics_process(delta: float) -> void:
 				jump_startup_timer = 0.14
 				trigger_squash(0.84, 1.18)
 				AudioManager.play_sfx("swing_light", -10.0, 1.35)
+				_play_anim("jump", true)
 			# 空中二段跳
 			elif up_pressed and not is_on_floor() and air_jumps_left > 0:
 				air_jumps_left -= 1
@@ -452,14 +514,20 @@ func _physics_process(delta: float) -> void:
 				jump_startup_timer = 0.12
 				trigger_squash(0.86, 1.18)
 				AudioManager.play_sfx("jump_double", -5.0, randf_range(0.96, 1.08))
+				_play_anim("jump", true)
 				var vfx := BattleVFX.get_current(get_tree())
 				if vfx:
 					vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -8.0), Color("#e2e8f0"), 10.0, 56.0, 0.22, 3.0)
 		else:
 			velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 
-		# 5. 普攻（J/1）与重击（K/2）（带 0.14s 输入缓冲）
-		if not guarding and dash_timer <= 0.0 and basic_cd <= 0.0 and attack_buffer_timer > 0.0:
+		# 5. 普攻（J/1）与重击（K/2）（带 4-6 帧 / 0.10s 预输入缓冲）
+		var allow_light_cancel: bool = can_cancel_attack and action_anim_state == "light" and attack_buffer_timer > 0.0 and basic_cd <= 0.0
+		if (not guarding and dash_timer <= 0.0 and basic_cd <= 0.0 and attack_buffer_timer > 0.0) or allow_light_cancel:
+			if allow_light_cancel:
+				action_anim_timer = 0.0
+				action_anim_state = ""
+				can_cancel_attack = false
 			attack_buffer_timer = 0.0
 			if attack_buffer_type == "light":
 				_perform_light_attack()
@@ -525,6 +593,9 @@ func _sync_animation_state() -> void:
 	elif not is_on_floor():
 		if jump_startup_timer > 0.0 and (has_rig or _sheet_textures.has("jump_startup")):
 			_play_anim("jump_startup")
+		elif velocity.y > 60.0 and anim_player and anim_player.has_animation("fall") and not (anim_player.current_animation == "jump" and anim_player.is_playing() and anim_player.current_animation_position < 0.40):
+			# 在中层或高层下落时（未主动起跳，或起跳上升期结束后进入下落阶段），切换到专属下落动画帧
+			_play_anim("fall")
 		else:
 			_play_anim("jump")
 	elif landing_timer > 0.0 and absf(velocity.x) <= 25.0 and (has_rig or _sheet_textures.has("landing")):
@@ -535,14 +606,44 @@ func _sync_animation_state() -> void:
 		_play_anim("idle")
 
 func _perform_light_attack() -> void:
-	basic_cd = 0.28 / _get_attack_speed_mult()
-	action_anim_state = "light"
-	action_anim_timer = 0.26 / _get_attack_speed_mult()
-	_play_anim("light", true)
-	trigger_squash(1.12, 0.90)
-	spawn_slash_arc(-65.0, 48.0, 90.0, theme_color.lightened(0.25), 0.14)
-	AudioManager.play_sfx("swing_light", -6.0, randf_range(0.94, 1.1))
-	_perform_melee(8, Vector2(facing * 240.0, -120.0), false)
+	var is_isfp: bool = (fighter_id == "isfp") or (anim_player and anim_player.has_animation("light"))
+	has_hit_target_in_attack = false
+	can_cancel_attack = false
+	light_attack_hit_registered = false
+
+	if is_isfp:
+		# 严格 12 帧（60 FPS = 0.20s）时间轴切片
+		action_anim_state = "light"
+		action_anim_timer = 0.20
+		basic_cd = 0.133 # 第 8 帧起冷却解除，允许无缝衔接下一次轻击缓冲
+		isfp_light_active = true
+		isfp_startup_step_timer = 0.034 # 第 1-2 帧微弱前进惯性/滑步补偿（~2 帧）
+		if is_on_floor():
+			velocity.x = facing * 120.0
+		_play_anim("light", true)
+		trigger_squash(1.08, 0.94)
+		# 纯净保留 fighter_light 自身美术表现，移除额外叠加的弧光，甩笔声效清脆跟手
+		AudioManager.play_sfx("swing_light", -6.0, randf_range(0.96, 1.08))
+	else:
+		basic_cd = 0.28 / _get_attack_speed_mult()
+		action_anim_state = "light"
+		action_anim_timer = 0.26 / _get_attack_speed_mult()
+		isfp_light_active = false
+		_play_anim("light", true)
+		trigger_squash(1.12, 0.90)
+		spawn_slash_arc(-65.0, 48.0, 90.0, theme_color.lightened(0.25), 0.14)
+		AudioManager.play_sfx("swing_light", -6.0, randf_range(0.94, 1.1))
+		_perform_melee(8, Vector2(facing * 240.0, -120.0), false)
+
+func _check_isfp_light_hitbox() -> void:
+	if light_attack_hit_registered:
+		return
+	# fighter_light 甩笔泼墨视觉覆盖宽度精确对齐 Hitbox 判定距离（128px）
+	var hit: bool = _perform_melee(8, Vector2(facing * 220.0, -90.0), false, 128.0)
+	if hit:
+		light_attack_hit_registered = true
+		has_hit_target_in_attack = true
+		can_cancel_attack = true
 
 func _perform_heavy_attack() -> void:
 	basic_cd = 0.48 / _get_attack_speed_mult()
@@ -738,35 +839,48 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		if vfx:
 			vfx.spawn_hit_fx(hit_pos + Vector2(facing * 20.0, 0.0), Color("#38bdf8"), false, true)
 			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -34.0), "格挡 -%d" % chip, Color("#7dd3fc"), 0.9)
-		GameManager.trigger_hitstop(0.05)
-		GameManager.trigger_shake(4.0, 0.09, Vector2(signf(knockback.x), 0.0))
+		# 普攻命中防御状态顿帧 2 帧（约 0.033s）
+		var block_hitstop: float = 0.033 if (attacker and attacker.action_anim_state == "light") else 0.05
+		GameManager.trigger_hitstop(block_hitstop)
+		GameManager.trigger_shake(3.0, 0.07, Vector2(signf(knockback.x), 0.0))
 		if hp <= 0:
 			_trigger_ko(attacker, false)
 		return
 
-	# 连击伤害递减（保证连招爽快但避免无限连秒杀）
+	# 连击伤害递减与防无限连击退递增（Pushback Scaling 防止无限压制）
 	var scaled_amount: int = amount
-	if attacker and not is_ultimate and attacker.current_combo_hits >= 2:
-		var mult: float = maxf(0.55, 1.0 - float(attacker.current_combo_hits - 1) * 0.07)
-		scaled_amount = maxi(2, int(round(float(amount) * mult)))
+	var pushback_mult: float = 1.0
+	if attacker and not is_ultimate and attacker.current_combo_hits >= 1:
+		# 连续命中多次普攻时，逐步提升受击方水平击退距离，避免墙角无限循环
+		pushback_mult = 1.0 + float(attacker.current_combo_hits - 1) * 0.18
+		if attacker.current_combo_hits >= 2:
+			var mult: float = maxf(0.55, 1.0 - float(attacker.current_combo_hits - 1) * 0.07)
+			scaled_amount = maxi(2, int(round(float(amount) * mult)))
 
-	var is_heavy: bool = scaled_amount >= 11 or is_ultimate
+	var is_light: bool = attacker != null and attacker.action_anim_state == "light" and not is_ultimate
+	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate) and not is_light
 	hp = maxi(0, hp - scaled_amount)
 	ep = minf(100.0, ep + scaled_amount * 0.9)
 	if attacker:
 		attacker.ep = minf(100.0, attacker.ep + scaled_amount * (0.0 if is_ultimate else 1.1))
 		attacker.register_combo_hit(scaled_amount)
-	velocity = knockback
-	hitstun_timer = 0.28 if is_ultimate else (0.22 if is_heavy else 0.15)
-	hit_flash_timer = 0.18 if is_ultimate else (0.14 if is_heavy else 0.1)
+	velocity = Vector2(knockback.x * pushback_mult, knockback.y)
+	# 受击硬直：普攻 10-12 帧（约 0.18s-0.20s）；重击 0.22s；奥义 0.28s
+	hitstun_timer = 0.28 if is_ultimate else (0.22 if is_heavy else (0.18 if is_light else 0.15))
+	# 受击闪白（Hit Flash）：普攻 2 帧（约 0.033s）
+	hit_flash_timer = 0.18 if is_ultimate else (0.14 if is_heavy else (0.033 if is_light else 0.1))
 	trigger_squash(0.86, 1.15)
 	AudioManager.play_sfx("hit_heavy" if is_heavy else "hit_light", -2.0 if is_heavy else -4.0, randf_range(0.93, 1.08))
 	if vfx:
 		var fx_col: Color = attacker.theme_color if attacker else theme_color
 		vfx.spawn_hit_fx(hit_pos, fx_col, is_heavy, false)
 		vfx.spawn_floating_text(hit_pos + Vector2(0.0, -36.0), "-%d" % scaled_amount, Color("#fde047") if is_heavy else Color("#ffffff"), 1.25 if is_ultimate else (1.1 if is_heavy else 0.95))
+	# 顿帧（Hitstop）：普攻命中 3 帧（0.05s）；重击 0.085s；大招 0.11s
 	GameManager.trigger_hitstop(0.11 if is_ultimate else (0.085 if is_heavy else 0.05))
-	GameManager.trigger_shake(13.0 if is_ultimate else (9.0 if is_heavy else 4.5), 0.22 if is_ultimate else (0.16 if is_heavy else 0.1), Vector2(signf(knockback.x), -0.25))
+	# 微震屏：普攻振幅 2.5px，持续 3-4 帧（约 0.06s）
+	var shake_amp: float = 13.0 if is_ultimate else (9.0 if is_heavy else (2.5 if is_light else 4.5))
+	var shake_dur: float = 0.22 if is_ultimate else (0.16 if is_heavy else (0.06 if is_light else 0.1))
+	GameManager.trigger_shake(shake_amp, shake_dur, Vector2(signf(knockback.x), -0.25))
 	if hp <= 0:
 		_trigger_ko(attacker, is_ultimate)
 
@@ -814,6 +928,9 @@ func _draw() -> void:
 func _on_hitbox_area_entered(area: Area2D) -> void:
 	var target = area.owner
 	if target != self and target is BaseFighter and not target.is_ko:
+		has_hit_target_in_attack = true
+		can_cancel_attack = true
+		light_attack_hit_registered = true
 		target.take_damage(current_attack_damage, current_attack_knockback, self, current_attack_is_ult)
 		if hitbox_col:
 			hitbox_col.set_deferred("disabled", true)
