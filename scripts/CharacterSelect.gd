@@ -1,6 +1,7 @@
 extends Control
 
 var active_slot: int = 1
+var _transitioning: bool = false
 var _card_buttons: Dictionary = {}
 var _cutout_shader: Shader = preload("res://shaders/cutout_white.gdshader")
 var _spot_anims: Dictionary = {1: {}, 2: {}}
@@ -164,11 +165,11 @@ func _setup_spotlight_visual(slot: int, portrait_rect: TextureRect, fid: String)
 		_spot_rigs[slot] = preview_rig
 		return
 
-	# 优先加载选人专属精灵表 avatar_sheet.png，其次播放角色待机动画 idle_sheet，否则用 1024 高清立绘
+	# 优先加载选人专属精灵表 avatar_sheet.png（8x8 共 64 帧 22fps 亚帧插值矢量动图），其次播放角色待机动画 idle_sheet，否则用 1024 高清立绘
 	var avatar_sheet_path: String = "res://assets/fighters/%s/concept/avatar_sheet.png" % fid
 	var sheet_cfg: Dictionary = {}
 	if ResourceLoader.exists(avatar_sheet_path):
-		sheet_cfg = {"path": avatar_sheet_path, "cols": 4, "rows": 4, "start": 0, "frames": 16, "fps": 16.0}
+		sheet_cfg = {"path": avatar_sheet_path, "cols": 8, "rows": 8, "start": 0, "frames": 64, "fps": 22.0, "pingpong": false}
 	else:
 		var fighter_sheets: Dictionary = GameManager.get_sprite_config(fid)
 		if fighter_sheets.has("idle"):
@@ -196,6 +197,7 @@ func _setup_spotlight_visual(slot: int, portrait_rect: TextureRect, fid: String)
 				"start": int(sheet_cfg.get("start", 0)),
 				"frames": int(sheet_cfg["frames"]),
 				"fps": float(sheet_cfg["fps"]),
+				"pingpong": bool(sheet_cfg.get("pingpong", false)),
 				"elapsed": 0.0
 			}
 			return
@@ -225,7 +227,15 @@ func _process(delta: float) -> void:
 		if anim.is_empty():
 			continue
 		anim["elapsed"] = float(anim["elapsed"]) + delta
-		var idx: int = int(floor(float(anim["elapsed"]) * float(anim["fps"]))) % maxi(1, int(anim["frames"]))
+		var total_f: int = maxi(1, int(anim["frames"]))
+		var raw_step: int = int(floor(float(anim["elapsed"]) * float(anim["fps"])))
+		var idx: int = 0
+		if bool(anim.get("pingpong", false)) and total_f > 2:
+			var cycle: int = total_f * 2 - 2
+			var pos_in_cycle: int = raw_step % cycle
+			idx = pos_in_cycle if pos_in_cycle < total_f else (cycle - pos_in_cycle)
+		else:
+			idx = raw_step % total_f
 		var real_idx: int = int(anim["start"]) + idx
 		var cols: int = int(anim["cols"])
 		var col: int = real_idx % cols
@@ -300,9 +310,15 @@ func _on_random_pressed() -> void:
 	_on_fighter_picked(String(pick["id"]))
 
 func _on_back_pressed() -> void:
+	if _transitioning:
+		return
+	_transitioning = true
 	AudioManager.play_sfx("ui_click")
 	get_tree().change_scene_to_file("res://scenes/Cover.tscn")
 
 func _on_start_fight_pressed() -> void:
+	if _transitioning:
+		return
+	_transitioning = true
 	AudioManager.play_sfx("ui_confirm")
 	get_tree().change_scene_to_file("res://scenes/BattleStage.tscn")

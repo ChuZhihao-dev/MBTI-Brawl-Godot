@@ -61,5 +61,5 @@ theme_override_font_sizes/font_size = 20
 text = "退出游戏"
 
 [connection signal="pressed" from="MenuDock/MenuBar/StartBtn" to="." method="_on_start_pressed"]
-[connection signal="pressed" from="MenuDock/MenuBar/VersusBtn" to="." method="_on_start_pressed"]
+[connection signal="pressed" from="MenuDock/MenuBar/VersusBtn" to="." method="_on_versus_pressed"]
 [connection signal="pressed" from="MenuDock/MenuBar/QuitBtn" to="." method="_on_quit_pressed"]

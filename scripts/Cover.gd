@@ -5,6 +5,8 @@ extends Control
 @onready var versus_btn: Button = $MenuDock/MenuBar/VersusBtn
 @onready var quit_btn: Button = $MenuDock/MenuBar/QuitBtn
 
+var _transitioning: bool = false
+
 func _ready() -> void:
 	GameManager.is_pause_menu_open = false
 	GameManager.hitstop_timer = 0.0
@@ -17,25 +19,30 @@ func _ready() -> void:
 	UIStyle.style_secondary_btn(versus_btn)
 	UIStyle.style_secondary_btn(quit_btn)
 
-	if not versus_btn.pressed.is_connected(_on_versus_pressed):
-		versus_btn.pressed.connect(_on_versus_pressed)
-
 func _unhandled_input(event: InputEvent) -> void:
+	if _transitioning:
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var kev := event as InputEventKey
 		if kev.keycode == KEY_ENTER or kev.keycode == KEY_SPACE:
 			_on_start_pressed()
 
-func _on_start_pressed() -> void:
+func _enter_select(mode: String) -> void:
+	if _transitioning:
+		return
+	_transitioning = true
 	AudioManager.play_sfx("ui_confirm")
-	GameManager.battle_mode = "ai"
+	GameManager.battle_mode = mode
 	get_tree().change_scene_to_file("res://scenes/CharacterSelect.tscn")
+
+func _on_start_pressed() -> void:
+	_enter_select("ai")
 
 func _on_versus_pressed() -> void:
-	AudioManager.play_sfx("ui_confirm")
-	GameManager.battle_mode = "pvp"
-	get_tree().change_scene_to_file("res://scenes/CharacterSelect.tscn")
+	_enter_select("pvp")
 
 func _on_quit_pressed() -> void:
+	if _transitioning:
+		return
 	AudioManager.play_sfx("ui_click")
 	get_tree().quit()

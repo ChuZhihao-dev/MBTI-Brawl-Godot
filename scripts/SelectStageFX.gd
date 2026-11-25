@@ -86,21 +86,19 @@ func _process(delta: float) -> void:
 	p1_color = p1_color.lerp(p1_target, c_step)
 	p2_color = p2_color.lerp(p2_target, c_step)
 
-	# 动态按背景图 cover 投影对齐 1P / 2P 人物站位与呼吸悬浮
+	# 动态按背景图 cover 投影对齐 1P / 2P 人物站位
 	var cover: Rect2 = _compute_cover_rect()
 	var char_size: float = clampf(cover.size.y * 0.36, 200.0, 390.0)
-	var bob1: float = sin(_time * 2.1) * 6.0
-	var bob2: float = sin(_time * 2.1 + 1.5) * 6.0
 	var p1_pos := Vector2(cover.position.x + cover.size.x * SPOT_U1, cover.position.y + cover.size.y * SPOT_V)
 	var p2_pos := Vector2(cover.position.x + cover.size.x * SPOT_U2, cover.position.y + cover.size.y * SPOT_V)
 
 	if _p1_spot:
 		_p1_spot.size = Vector2(char_size, char_size)
-		_p1_spot.position = Vector2(p1_pos.x - char_size * 0.5, p1_pos.y - char_size * 0.94 + bob1)
+		_p1_spot.position = Vector2(p1_pos.x - char_size * 0.5, p1_pos.y - char_size * 0.94)
 		_p1_spot.pivot_offset = Vector2(char_size * 0.5, char_size * 0.9)
 	if _p2_spot:
 		_p2_spot.size = Vector2(char_size, char_size)
-		_p2_spot.position = Vector2(p2_pos.x - char_size * 0.5, p2_pos.y - char_size * 0.94 + bob2)
+		_p2_spot.position = Vector2(p2_pos.x - char_size * 0.5, p2_pos.y - char_size * 0.94)
 		_p2_spot.pivot_offset = Vector2(char_size * 0.5, char_size * 0.9)
 
 	for m: Dictionary in _motes:
@@ -147,26 +145,6 @@ func _draw_diamond(pos: Vector2, r: float, col: Color) -> void:
 
 func _draw() -> void:
 	var cover: Rect2 = _compute_cover_rect()
-	var p1_c := Vector2(cover.position.x + cover.size.x * SPOT_U1, cover.position.y + cover.size.y * SPOT_V)
-	var p2_c := Vector2(cover.position.x + cover.size.x * SPOT_U2, cover.position.y + cover.size.y * SPOT_V)
-	var rx: float = cover.size.x * 0.105
-	var ry: float = cover.size.y * 0.034
-	var b1: float = 0.85 + sin(_time * 1.6) * 0.15
-	var b2: float = 0.85 + sin(_time * 1.6 + 1.6) * 0.15
-
-	# 左右石台同心阵营共振环
-	_draw_ellipse_ring(p1_c, rx, ry, Color(p1_color.r, p1_color.g, p1_color.b, 0.45 * b1), 2.5)
-	_draw_ellipse_ring(p1_c, rx * 0.72, ry * 0.72, Color(1.0, 0.98, 0.9, 0.55 * b1), 1.5)
-	_draw_ellipse_ring(p2_c, rx, ry, Color(p2_color.r, p2_color.g, p2_color.b, 0.45 * b2), 2.5)
-	_draw_ellipse_ring(p2_c, rx * 0.72, ry * 0.72, Color(1.0, 0.98, 0.9, 0.55 * b2), 1.5)
-
-	# 锁定扩散涟漪
-	for r: Dictionary in _ripples:
-		var prog: float = float(r["progress"])
-		var ease_p: float = 1.0 - pow(1.0 - prog, 3.0)
-		var col: Color = r["color"] as Color
-		var rc := Vector2(cover.position.x + cover.size.x * float(r["u"]), cover.position.y + cover.size.y * float(r["v"]))
-		_draw_ellipse_ring(rc, rx * (0.8 + ease_p * 0.9), ry * (0.8 + ease_p * 1.1), Color(col.r, col.g, col.b, (1.0 - prog) * 0.7), 3.0)
 
 	# 空气上升低多边形光尘
 	for m: Dictionary in _motes:

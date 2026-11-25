@@ -103,6 +103,12 @@ func load_fighter_sprites(fid: String) -> void:
 			sprite.visible = true
 
 	_sheet_configs = GameManager.get_sprite_config(fid)
+	if _sheet_configs.is_empty():
+		var avatar_sheet_path := "res://assets/fighters/%s/concept/avatar_sheet.png" % fid
+		if ResourceLoader.exists(avatar_sheet_path):
+			_sheet_configs = {
+				"idle": {"path": avatar_sheet_path, "cols": 8, "rows": 8, "start": 0, "frames": 64, "fps": 22.0, "loop": true}
+			}
 	_sheet_textures.clear()
 	for state_name in _sheet_configs.keys():
 		var cfg: Dictionary = _sheet_configs[state_name] as Dictionary
