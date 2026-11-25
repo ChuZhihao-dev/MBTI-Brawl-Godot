@@ -70,6 +70,7 @@ const ROSTER: Array[Dictionary] = [
 
 const FIGHTER_SCENES: Dictionary = {
 	"enfj": "res://scenes/ENFJ.tscn",
+	"isfp": "res://scenes/ISFP.tscn",
 	"infj": "res://scenes/INFJ.tscn"
 }
 

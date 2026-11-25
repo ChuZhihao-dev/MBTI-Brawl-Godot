@@ -563,7 +563,7 @@ func _process(delta: float) -> void:
 		p1_label.text = "1P %s   %d / %d" % [_p1.fighter_name, _p1.hp, _p1.max_hp]
 		_p1_ep_bar.value = _p1.ep
 		if _p1.ep >= 100.0:
-			_p1_ep_lbl.text = "EP 100% · 大招就绪 (%s)" % GameManager.get_action_key_label("p1_ult")
+			_p1_ep_lbl.text = "EP 100%% · 大招就绪 (%s)" % GameManager.get_action_key_label("p1_ult")
 			_p1_ep_lbl.add_theme_color_override("font_color", Color("#d97706"))
 		else:
 			_p1_ep_lbl.text = "EP %d%%" % int(_p1.ep)

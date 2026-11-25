@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://brcim5vn27w46" path="res://scripts/BaseFighter.gd" id="1_script"]
 [ext_resource type="Shader" uid="uid://bfwumpjugyb4d" path="res://shaders/cutout_white.gdshader" id="2_shader"]
-[ext_resource type="Texture2D" uid="uid://ce8v2bdn81tb7" path="res://assets/fighters/enfj/concept/portrait.png" id="3_tex"]
+[ext_resource type="Texture2D" uid="uid://b6mh056nvttc7" path="res://assets/fighters/enfj/concept/portrait.png" id="3_tex"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_flash"]
 resource_local_to_scene = true
