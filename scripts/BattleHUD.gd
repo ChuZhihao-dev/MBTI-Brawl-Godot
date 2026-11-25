@@ -16,6 +16,8 @@ var _p1: BaseFighter
 var _p2: BaseFighter
 var _p1_ep_bar: ProgressBar
 var _p2_ep_bar: ProgressBar
+var _p1_shield_bar: ProgressBar
+var _p2_shield_bar: ProgressBar
 var _p1_ep_lbl: Label
 var _p2_ep_lbl: Label
 var _p1_status_lbl: Label
@@ -26,15 +28,20 @@ var _p1_trail_bar: ProgressBar
 var _p2_trail_bar: ProgressBar
 var _p1_combo_lbl: Label
 var _p2_combo_lbl: Label
+var _p1_rounds_lbl: Label
+var _p2_rounds_lbl: Label
 var _timer_lbl: Label
 var _mute_btn: Button
+var _bgm_btn: Button
 var _hint_lbl: Label
 
 var _pause_overlay: Control
 var _pause_mute_btn: Button
+var _pause_bgm_btn: Button
 var _ko_overlay: Control
 var _ko_badge_lbl: Label
 var _ko_winner_lbl: Label
+var _ko_stats_lbl: Label
 var _ko_portrait: TextureRect
 
 var _rebind_action: String = ""
@@ -54,6 +61,7 @@ func _ready() -> void:
 	_build_ko_panel()
 	_refresh_key_hints()
 	AudioManager.mute_changed.connect(_on_mute_changed)
+	AudioManager.bgm_mute_changed.connect(_on_bgm_mute_changed)
 	GameManager.keybindings_changed.connect(_refresh_key_hints)
 	GameManager.combo_updated.connect(_on_combo_updated)
 
@@ -65,28 +73,28 @@ func bind_fighters(p1: BaseFighter, p2: BaseFighter) -> void:
 	if _p2:
 		_p2_trail_val = float(_p2.hp)
 
-func play_round_intro(on_fight: Callable) -> void:
+func play_round_intro(on_fight: Callable, round_title: String = "READY...") -> void:
 	var banner := Label.new()
 	banner.set_anchors_preset(Control.PRESET_CENTER)
-	banner.offset_left = -360.0
-	banner.offset_right = 360.0
+	banner.offset_left = -420.0
+	banner.offset_right = 420.0
 	banner.offset_top = -90.0
 	banner.offset_bottom = 90.0
 	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	banner.text = "READY..."
-	banner.add_theme_font_size_override("font_size", 92)
+	banner.text = round_title
+	banner.add_theme_font_size_override("font_size", 86)
 	banner.add_theme_color_override("font_color", Color("#fef08a"))
 	banner.add_theme_color_override("font_outline_color", Color("#0f172a"))
 	banner.add_theme_constant_override("outline_size", 14)
-	banner.pivot_offset = Vector2(360.0, 90.0)
+	banner.pivot_offset = Vector2(420.0, 90.0)
 	banner.scale = Vector2(0.5, 0.5)
 	add_child(banner)
 
 	AudioManager.play_sfx("round_ready", -2.0)
 	var tw := create_tween()
 	tw.tween_property(banner, "scale", Vector2(1.08, 1.08), 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(0.55)
+	tw.tween_interval(0.58)
 	tw.tween_callback(func() -> void:
 		if is_instance_valid(banner):
 			banner.text = "FIGHT!!"
@@ -100,6 +108,43 @@ func play_round_intro(on_fight: Callable) -> void:
 	tw.tween_interval(0.35)
 	tw.tween_property(banner, "modulate:a", 0.0, 0.25)
 	tw.tween_callback(banner.queue_free)
+
+func show_round_banner(title_text: String, accent: Color) -> void:
+	var banner := Label.new()
+	banner.set_anchors_preset(Control.PRESET_CENTER)
+	banner.offset_left = -460.0
+	banner.offset_right = 460.0
+	banner.offset_top = -80.0
+	banner.offset_bottom = 80.0
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	banner.text = title_text
+	banner.add_theme_font_size_override("font_size", 68)
+	banner.add_theme_color_override("font_color", accent.lightened(0.25))
+	banner.add_theme_color_override("font_outline_color", Color("#0f172a"))
+	banner.add_theme_constant_override("outline_size", 12)
+	banner.pivot_offset = Vector2(460.0, 80.0)
+	banner.scale = Vector2(0.6, 0.6)
+	add_child(banner)
+
+	var tw := create_tween()
+	tw.tween_property(banner, "scale", Vector2(1.05, 1.05), 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(1.05)
+	tw.tween_property(banner, "modulate:a", 0.0, 0.30)
+	tw.tween_callback(banner.queue_free)
+
+func set_round_scores(p1_wins: int, p2_wins: int) -> void:
+	var total: int = GameManager.rounds_to_win
+	if _p1_rounds_lbl:
+		var s1 := ""
+		for i in range(total):
+			s1 += "● " if i < p1_wins else "○ "
+		_p1_rounds_lbl.text = s1.strip_edges()
+	if _p2_rounds_lbl:
+		var s2 := ""
+		for i in range(total):
+			s2 += "● " if i < p2_wins else "○ "
+		_p2_rounds_lbl.text = s2.strip_edges()
 
 func _on_combo_updated(attacker_idx: int, combo_count: int, total_dmg: int) -> void:
 	var lbl: Label = _p1_combo_lbl if attacker_idx == 1 else _p2_combo_lbl
@@ -138,13 +183,21 @@ func _build_hud_extensions() -> void:
 	UIStyle.style_hp_bar(_p2_trail_bar, Color("#facc15"))
 	p2_bar.add_child(_p2_trail_bar)
 
-	# 1P / 2P 能量条（EP）与技能冷却/Buff 状态条
+	# 1P / 2P 能量条（EP）、护盾耐久条（Shield）与技能冷却/Buff 状态条
 	_p1_ep_bar = ProgressBar.new()
-	_p1_ep_bar.custom_minimum_size = Vector2(0, 12)
+	_p1_ep_bar.custom_minimum_size = Vector2(0, 11)
 	_p1_ep_bar.max_value = 100.0
 	_p1_ep_bar.show_percentage = false
 	UIStyle.style_hp_bar(_p1_ep_bar, Color("#0ea5e9"))
 	p1_box.add_child(_p1_ep_bar)
+
+	_p1_shield_bar = ProgressBar.new()
+	_p1_shield_bar.custom_minimum_size = Vector2(0, 6)
+	_p1_shield_bar.max_value = 100.0
+	_p1_shield_bar.value = 100.0
+	_p1_shield_bar.show_percentage = false
+	UIStyle.style_hp_bar(_p1_shield_bar, Color("#38bdf8"))
+	p1_box.add_child(_p1_shield_bar)
 
 	var p1_sub := HBoxContainer.new()
 	p1_box.add_child(p1_sub)
@@ -161,12 +214,21 @@ func _build_hud_extensions() -> void:
 	p1_sub.add_child(_p1_status_lbl)
 
 	_p2_ep_bar = ProgressBar.new()
-	_p2_ep_bar.custom_minimum_size = Vector2(0, 12)
+	_p2_ep_bar.custom_minimum_size = Vector2(0, 11)
 	_p2_ep_bar.max_value = 100.0
 	_p2_ep_bar.fill_mode = ProgressBar.FILL_END_TO_BEGIN
 	_p2_ep_bar.show_percentage = false
 	UIStyle.style_hp_bar(_p2_ep_bar, Color("#0ea5e9"))
 	p2_box.add_child(_p2_ep_bar)
+
+	_p2_shield_bar = ProgressBar.new()
+	_p2_shield_bar.custom_minimum_size = Vector2(0, 6)
+	_p2_shield_bar.max_value = 100.0
+	_p2_shield_bar.value = 100.0
+	_p2_shield_bar.fill_mode = ProgressBar.FILL_END_TO_BEGIN
+	_p2_shield_bar.show_percentage = false
+	UIStyle.style_hp_bar(_p2_shield_bar, Color("#38bdf8"))
+	p2_box.add_child(_p2_shield_bar)
 
 	var p2_sub := HBoxContainer.new()
 	p2_box.add_child(p2_sub)
@@ -204,21 +266,42 @@ func _build_hud_extensions() -> void:
 	_p2_combo_lbl.visible = false
 	add_child(_p2_combo_lbl)
 
-	# 中央倒计时 + 暂停/静音区（替换原本孤立的 BackBtn 布局）
+	# 中央倒计时 + BO3 胜场圆点 + 暂停/音效/BGM 开关
 	var center_box := VBoxContainer.new()
 	center_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	center_box.add_theme_constant_override("separation", 4)
+
+	var timer_row := HBoxContainer.new()
+	timer_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	timer_row.add_theme_constant_override("separation", 10)
+	center_box.add_child(timer_row)
+
+	_p1_rounds_lbl = Label.new()
+	_p1_rounds_lbl.text = "○ ○"
+	_p1_rounds_lbl.add_theme_font_size_override("font_size", 22)
+	_p1_rounds_lbl.add_theme_color_override("font_color", Color("#f59e0b"))
+	_p1_rounds_lbl.add_theme_color_override("font_outline_color", Color("#0f172a"))
+	_p1_rounds_lbl.add_theme_constant_override("outline_size", 5)
+	timer_row.add_child(_p1_rounds_lbl)
 
 	var timer_panel := PanelContainer.new()
 	UIStyle.style_frosted_panel(timer_panel, Color("#1e293b"), 2)
 	_timer_lbl = Label.new()
 	_timer_lbl.text = "99"
 	_timer_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_timer_lbl.custom_minimum_size = Vector2(88, 38)
-	_timer_lbl.add_theme_font_size_override("font_size", 34)
+	_timer_lbl.custom_minimum_size = Vector2(82, 36)
+	_timer_lbl.add_theme_font_size_override("font_size", 32)
 	_timer_lbl.add_theme_color_override("font_color", Color("#0f172a"))
 	timer_panel.add_child(_timer_lbl)
-	center_box.add_child(timer_panel)
+	timer_row.add_child(timer_panel)
+
+	_p2_rounds_lbl = Label.new()
+	_p2_rounds_lbl.text = "○ ○"
+	_p2_rounds_lbl.add_theme_font_size_override("font_size", 22)
+	_p2_rounds_lbl.add_theme_color_override("font_color", Color("#f59e0b"))
+	_p2_rounds_lbl.add_theme_color_override("font_outline_color", Color("#0f172a"))
+	_p2_rounds_lbl.add_theme_constant_override("outline_size", 5)
+	timer_row.add_child(_p2_rounds_lbl)
 
 	var btn_row := HBoxContainer.new()
 	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -226,7 +309,7 @@ func _build_hud_extensions() -> void:
 
 	var pause_btn := Button.new()
 	pause_btn.text = "暂停(ESC)"
-	pause_btn.add_theme_font_size_override("font_size", 13)
+	pause_btn.add_theme_font_size_override("font_size", 12)
 	UIStyle.style_secondary_btn(pause_btn)
 	pause_btn.pressed.connect(func() -> void:
 		AudioManager.play_sfx("ui_click")
@@ -235,14 +318,24 @@ func _build_hud_extensions() -> void:
 	btn_row.add_child(pause_btn)
 
 	_mute_btn = Button.new()
-	_mute_btn.text = "静音" if AudioManager.muted else "音效开"
-	_mute_btn.add_theme_font_size_override("font_size", 13)
+	_mute_btn.text = "音效关" if AudioManager.muted else "音效开"
+	_mute_btn.add_theme_font_size_override("font_size", 12)
 	UIStyle.style_secondary_btn(_mute_btn)
 	_mute_btn.pressed.connect(func() -> void:
 		AudioManager.toggle_mute()
 		AudioManager.play_sfx("ui_click")
 	)
 	btn_row.add_child(_mute_btn)
+
+	_bgm_btn = Button.new()
+	_bgm_btn.text = "BGM关" if AudioManager.bgm_muted else "BGM开"
+	_bgm_btn.add_theme_font_size_override("font_size", 12)
+	UIStyle.style_secondary_btn(_bgm_btn)
+	_bgm_btn.pressed.connect(func() -> void:
+		AudioManager.toggle_bgm()
+		AudioManager.play_sfx("ui_click")
+	)
+	btn_row.add_child(_bgm_btn)
 	center_box.add_child(btn_row)
 
 	back_btn.visible = false
@@ -324,6 +417,15 @@ func _build_pause_panel() -> void:
 	)
 	action_row.add_child(_pause_mute_btn)
 
+	_pause_bgm_btn = Button.new()
+	_pause_bgm_btn.text = "BGM：关闭" if AudioManager.bgm_muted else "BGM：开启"
+	UIStyle.style_secondary_btn(_pause_bgm_btn)
+	_pause_bgm_btn.pressed.connect(func() -> void:
+		AudioManager.toggle_bgm()
+		AudioManager.play_sfx("ui_click")
+	)
+	action_row.add_child(_pause_bgm_btn)
+
 	var reset_btn := Button.new()
 	reset_btn.text = "恢复默认键位"
 	UIStyle.style_secondary_btn(reset_btn)
@@ -401,33 +503,39 @@ func _build_ko_panel() -> void:
 	_ko_overlay.add_child(center)
 
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(540, 440)
+	card.custom_minimum_size = Vector2(620, 520)
 	UIStyle.style_frosted_panel(card, Color("#f59e0b"), 3)
 	center.add_child(card)
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 14)
+	vbox.add_theme_constant_override("separation", 12)
 	card.add_child(vbox)
 
 	_ko_badge_lbl = Label.new()
 	_ko_badge_lbl.text = "K.O.!"
 	_ko_badge_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_ko_badge_lbl.add_theme_font_size_override("font_size", 52)
+	_ko_badge_lbl.add_theme_font_size_override("font_size", 48)
 	_ko_badge_lbl.add_theme_color_override("font_color", Color("#d97706"))
 	vbox.add_child(_ko_badge_lbl)
 
 	_ko_portrait = TextureRect.new()
-	_ko_portrait.custom_minimum_size = Vector2(180, 180)
+	_ko_portrait.custom_minimum_size = Vector2(150, 150)
 	_ko_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_ko_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	vbox.add_child(_ko_portrait)
 
 	_ko_winner_lbl = Label.new()
 	_ko_winner_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_ko_winner_lbl.add_theme_font_size_override("font_size", 28)
+	_ko_winner_lbl.add_theme_font_size_override("font_size", 26)
 	_ko_winner_lbl.add_theme_color_override("font_color", Color("#0f172a"))
 	vbox.add_child(_ko_winner_lbl)
+
+	_ko_stats_lbl = Label.new()
+	_ko_stats_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_ko_stats_lbl.add_theme_font_size_override("font_size", 16)
+	_ko_stats_lbl.add_theme_color_override("font_color", Color("#334155"))
+	vbox.add_child(_ko_stats_lbl)
 
 	var btn_row := HBoxContainer.new()
 	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -453,12 +561,21 @@ func show_ko_overlay(winner: BaseFighter, badge_text: String = "K.O.!") -> void:
 	_ko_badge_lbl.text = badge_text
 	if winner:
 		var meta: Dictionary = GameManager.get_fighter_meta(winner.fighter_id)
-		_ko_winner_lbl.text = "%dP %s 获胜！ · %s" % [winner.player_index, winner.fighter_name, String(meta["title"])]
+		_ko_winner_lbl.text = "%dP %s 夺得胜利！ (%d : %d) · %s" % [winner.player_index, winner.fighter_name, GameManager.p1_rounds, GameManager.p2_rounds, String(meta["title"])]
 		_ko_portrait.texture = GameManager.get_portrait_texture(winner.fighter_id)
 		_ko_portrait.visible = _ko_portrait.texture != null
 	else:
-		_ko_winner_lbl.text = "势均力敌 · 平局 (DRAW)"
+		_ko_winner_lbl.text = "势均力敌 · 平局 (%d : %d)" % [GameManager.p1_rounds, GameManager.p2_rounds]
 		_ko_portrait.visible = false
+	if _ko_stats_lbl:
+		var s1: Dictionary = GameManager.match_stats.get(1, {}) as Dictionary
+		var s2: Dictionary = GameManager.match_stats.get(2, {}) as Dictionary
+		var p1_n: String = _p1.fighter_name if is_instance_valid(_p1) else "1P"
+		var p2_n: String = _p2.fighter_name if is_instance_valid(_p2) else "2P"
+		_ko_stats_lbl.text = "━━ 战局 MVP 数据统计 ━━\n1P %s: 总伤害 %d · 最高连击 %d · 完美格挡 %d · 道具 %d\n2P %s: 总伤害 %d · 最高连击 %d · 完美格挡 %d · 道具 %d" % [
+			p1_n, int(s1.get("damage", 0)), int(s1.get("max_combo", 0)), int(s1.get("parries", 0)), int(s1.get("items", 0)),
+			p2_n, int(s2.get("damage", 0)), int(s2.get("max_combo", 0)), int(s2.get("parries", 0)), int(s2.get("items", 0))
+		]
 	_ko_overlay.visible = true
 
 func _start_rebind(action_name: String) -> void:
@@ -506,9 +623,15 @@ func _refresh_key_hints() -> void:
 
 func _on_mute_changed(is_muted: bool) -> void:
 	if _mute_btn:
-		_mute_btn.text = "静音" if is_muted else "音效开"
+		_mute_btn.text = "音效关" if is_muted else "音效开"
 	if _pause_mute_btn:
 		_pause_mute_btn.text = "音效：关闭" if is_muted else "音效：开启"
+
+func _on_bgm_mute_changed(is_bgm_muted: bool) -> void:
+	if _bgm_btn:
+		_bgm_btn.text = "BGM关" if is_bgm_muted else "BGM开"
+	if _pause_bgm_btn:
+		_pause_bgm_btn.text = "BGM：关闭" if is_bgm_muted else "BGM：开启"
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -562,11 +685,14 @@ func _process(delta: float) -> void:
 			_p1_trail_bar.value = _p1_trail_val
 		p1_label.text = "1P %s   %d / %d" % [_p1.fighter_name, _p1.hp, _p1.max_hp]
 		_p1_ep_bar.value = _p1.ep
+		if _p1_shield_bar:
+			_p1_shield_bar.value = _p1.shield_hp
+			_p1_shield_bar.modulate = Color("#ef4444") if (_p1.shield_broken_timer > 0.0 or _p1.shield_hp < 30.0) else Color.WHITE
 		if _p1.ep >= 100.0:
 			_p1_ep_lbl.text = "EP 100%% · 大招就绪 (%s)" % GameManager.get_action_key_label("p1_ult")
 			_p1_ep_lbl.add_theme_color_override("font_color", Color("#d97706"))
 		else:
-			_p1_ep_lbl.text = "EP %d%%" % int(_p1.ep)
+			_p1_ep_lbl.text = "EP %d%% · 盾 %d%%" % [int(_p1.ep), int(_p1.shield_hp)]
 			_p1_ep_lbl.add_theme_color_override("font_color", Color("#0f172a"))
 		if _p1_status_lbl:
 			_p1_status_lbl.text = _format_fighter_status(_p1)
@@ -580,11 +706,14 @@ func _process(delta: float) -> void:
 		var p2_tag := ("AI·困难" if GameManager.ai_difficulty == "hard" else "AI·普通") if _p2.is_ai_controlled else "2P"
 		p2_label.text = "%d / %d   %s %s" % [_p2.hp, _p2.max_hp, _p2.fighter_name, p2_tag]
 		_p2_ep_bar.value = _p2.ep
+		if _p2_shield_bar:
+			_p2_shield_bar.value = _p2.shield_hp
+			_p2_shield_bar.modulate = Color("#ef4444") if (_p2.shield_broken_timer > 0.0 or _p2.shield_hp < 30.0) else Color.WHITE
 		if _p2.ep >= 100.0:
 			_p2_ep_lbl.text = "(%s) 大招就绪 · EP 100%%" % GameManager.get_action_key_label("p2_ult")
 			_p2_ep_lbl.add_theme_color_override("font_color", Color("#d97706"))
 		else:
-			_p2_ep_lbl.text = "EP %d%%" % int(_p2.ep)
+			_p2_ep_lbl.text = "盾 %d%% · EP %d%%" % [int(_p2.shield_hp), int(_p2.ep)]
 			_p2_ep_lbl.add_theme_color_override("font_color", Color("#0f172a"))
 		if _p2_status_lbl:
 			_p2_status_lbl.text = _format_fighter_status(_p2)

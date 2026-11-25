@@ -9,6 +9,13 @@ var ai_difficulty: String = "normal" # "normal" 或 "hard"
 var hitstop_timer: float = 0.0
 var is_pause_menu_open: bool = false
 
+# BO3 三局两胜制与局末 MVP 统计
+var rounds_to_win: int = 2
+var p1_rounds: int = 0
+var p2_rounds: int = 0
+var current_round: int = 1
+var match_stats: Dictionary = {}
+
 signal camera_shake_requested(intensity: float, duration: float, dir: Vector2)
 signal keybindings_changed()
 signal combo_updated(attacker_index: int, combo_count: int, total_damage: int)
@@ -154,7 +161,26 @@ func trigger_shake(intensity: float, duration: float = 0.16, dir: Vector2 = Vect
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	reset_match_state()
 	load_keybindings()
+
+func reset_match_state() -> void:
+	p1_rounds = 0
+	p2_rounds = 0
+	current_round = 1
+	match_stats = {
+		1: {"damage": 0, "max_combo": 0, "parries": 0, "items": 0},
+		2: {"damage": 0, "max_combo": 0, "parries": 0, "items": 0}
+	}
+
+func record_stat(player_idx: int, key: String, val: int) -> void:
+	if not match_stats.has(player_idx):
+		match_stats[player_idx] = {"damage": 0, "max_combo": 0, "parries": 0, "items": 0}
+	var bucket: Dictionary = match_stats[player_idx] as Dictionary
+	if key == "max_combo":
+		bucket[key] = maxi(int(bucket.get(key, 0)), val)
+	else:
+		bucket[key] = int(bucket.get(key, 0)) + val
 
 func _process(delta: float) -> void:
 	if hitstop_timer > 0.0:

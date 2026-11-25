@@ -58,9 +58,21 @@ func _get_melee_range_bonus() -> float:
 	return 28.0 if aura_buff_timer > 0.0 else 0.0
 
 func get_active_buff_status() -> String:
+	var base_s: String = super.get_active_buff_status()
 	if aura_buff_timer > 0.0:
-		return "气焰共鸣 %.1fs" % aura_buff_timer
-	return ""
+		var aura_s: String = "气焰共鸣 %.1fs" % aura_buff_timer
+		return (aura_s + " · " + base_s) if base_s != "" else aura_s
+	return base_s
+
+func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void:
+	aura_buff_timer = 0.0
+	_combo_count = 0
+	_combo_reset_timer = 0.0
+	_pending_waves.clear()
+	_pending_heavy.clear()
+	if _aura_sprite:
+		_aura_sprite.visible = false
+	super.reset_for_new_round(spawn_pos, keep_ep_ratio)
 
 func _physics_process(delta: float) -> void:
 	if aura_buff_timer > 0.0:

@@ -59,12 +59,21 @@ func _physics_process(delta: float) -> void:
 		fighter.ai_input = inp
 		return
 
+	var is_hard: bool = difficulty == "hard"
+
+	# 0. 受击空中落地受身（困难 AI 会在快落地时主动按闪避受身）
+	if fighter.hitstun_timer > 0.0 and not fighter.is_on_floor() and fighter.velocity.y > 160.0:
+		if is_hard and randf() < 0.38:
+			inp["dash_just"] = true
+			inp["horiz"] = -signf(opponent.global_position.x - fighter.global_position.x)
+			fighter.ai_input = inp
+			return
+
 	_think_timer -= delta
 	if _think_timer > 0.0:
 		fighter.ai_input = inp
 		return
 
-	var is_hard: bool = difficulty == "hard"
 	_think_timer = randf_range(0.08, 0.16) if is_hard else randf_range(0.16, 0.28)
 
 	# 1. 优先检查场上道具（抢水晶/回血果，躲定时炸弹）
@@ -105,14 +114,32 @@ func _physics_process(delta: float) -> void:
 			fighter.ai_input = inp
 			return
 
-	# 3. 防御 / 完美格挡反应（对手近距离出招时）
+	# 3. 防御 / 完美格挡反应（对手近距离出招时，低护盾则改为后撤闪避避免破防）
 	var opp_attacking: bool = opponent.action_anim_timer > 0.08 and absf(opponent.global_position.x - fighter.global_position.x) < 160.0
-	if opp_attacking and fighter.is_on_floor() and randf() < (0.48 if is_hard else 0.24):
-		_guard_timer = randf_range(0.16, 0.34)
-		inp["guard_held"] = true
-		inp["horiz"] = 0.0
-		fighter.ai_input = inp
-		return
+	if opp_attacking and fighter.is_on_floor():
+		if fighter.shield_hp < 28.0 and fighter.dash_cd <= 0.0:
+			inp["horiz"] = -dir_to_target
+			inp["dash_just"] = true
+			fighter.ai_input = inp
+			return
+		if fighter.shield_hp >= 28.0 and randf() < (0.48 if is_hard else 0.24):
+			_guard_timer = randf_range(0.16, 0.34)
+			inp["guard_held"] = true
+			inp["horiz"] = 0.0
+			fighter.ai_input = inp
+			return
+
+	# 3.5 空中快速下落与空中下砸（正上方压制对手）
+	if not fighter.is_on_floor() and fighter.velocity.y > 50.0 and not chasing_item:
+		var air_dx: float = absf(opponent.global_position.x - fighter.global_position.x)
+		var air_dy: float = opponent.global_position.y - fighter.global_position.y
+		if air_dx < 115.0 and air_dy > 70.0 and fighter.basic_cd <= 0.0 and randf() < (0.42 if is_hard else 0.22):
+			inp["guard_held"] = true
+			inp["heavy_just"] = true
+			fighter.ai_input = inp
+			return
+		elif air_dy > 110.0 and randf() < 0.5:
+			inp["guard_held"] = true
 
 	# 4. 平台跳跃与追击移动
 	var is_ranged: bool = fighter.fighter_id == "infj"

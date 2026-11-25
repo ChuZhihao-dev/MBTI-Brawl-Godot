@@ -6,8 +6,11 @@ var p1: BaseFighter
 var p2: BaseFighter
 var p2_ai: FighterAI
 var vfx: BattleVFX
+var p1_spawn_pos := Vector2(580.0, 550.0)
+var p2_spawn_pos := Vector2(1210.0, 550.0)
 var match_time: float = MATCH_DURATION
 var match_started: bool = false
+var round_ending: bool = false
 var match_ended: bool = false
 
 @onready var camera: Camera2D = $SmashCamera2D
@@ -16,7 +19,9 @@ var match_ended: bool = false
 func _ready() -> void:
 	GameManager.is_pause_menu_open = false
 	GameManager.hitstop_timer = 0.0
+	GameManager.reset_match_state()
 	get_tree().paused = false
+	AudioManager.start_battle_bgm()
 
 	# 动态阳光丁达尔光束与飘浮光尘氛围
 	var atmo := ArenaAtmosphereFX.new()
@@ -57,21 +62,21 @@ func _ready() -> void:
 	spawner.spawn_position = Vector2(900.0, 244.0)
 	add_child(spawner)
 
-	var p1_pos := Vector2(580.0, 550.0)
-	var p2_pos := Vector2(1210.0, 550.0)
+	p1_spawn_pos = Vector2(580.0, 550.0)
+	p2_spawn_pos = Vector2(1210.0, 550.0)
 	var old_p1 := get_node_or_null("P1")
 	if old_p1:
-		p1_pos = old_p1.position
+		p1_spawn_pos = old_p1.position
 		remove_child(old_p1)
 		old_p1.queue_free()
 	var old_p2 := get_node_or_null("P2")
 	if old_p2:
-		p2_pos = old_p2.position
+		p2_spawn_pos = old_p2.position
 		remove_child(old_p2)
 		old_p2.queue_free()
 
-	p1 = _spawn_fighter(GameManager.selected_p1, 1, p1_pos)
-	p2 = _spawn_fighter(GameManager.selected_p2, 2, p2_pos)
+	p1 = _spawn_fighter(GameManager.selected_p1, 1, p1_spawn_pos)
+	p2 = _spawn_fighter(GameManager.selected_p2, 2, p2_spawn_pos)
 
 	if GameManager.battle_mode == "ai":
 		p2_ai = FighterAI.new()
@@ -83,12 +88,23 @@ func _ready() -> void:
 		camera.set_targets(p1, p2)
 	if hud and hud.has_method("bind_fighters"):
 		hud.bind_fighters(p1, p2)
+	if hud and hud.has_method("set_round_scores"):
+		hud.set_round_scores(GameManager.p1_rounds, GameManager.p2_rounds)
 
-	# 开场 READY... FIGHT! 仪式感
+	# 开场 ROUND 1... FIGHT! 仪式感
 	_play_round_intro()
+
+func _exit_tree() -> void:
+	AudioManager.stop_bgm()
+
+func _get_round_label() -> String:
+	if GameManager.p1_rounds == GameManager.rounds_to_win - 1 and GameManager.p2_rounds == GameManager.rounds_to_win - 1:
+		return "FINAL ROUND"
+	return "ROUND %d" % GameManager.current_round
 
 func _play_round_intro() -> void:
 	match_started = false
+	round_ending = false
 	if p1:
 		p1.battle_locked = true
 	if p2:
@@ -100,7 +116,7 @@ func _play_round_intro() -> void:
 				p1.battle_locked = false
 			if is_instance_valid(p2) and not match_ended:
 				p2.battle_locked = false
-		)
+		, _get_round_label())
 	else:
 		match_started = true
 		if p1:
@@ -130,7 +146,7 @@ func _spawn_fighter(fid: String, player_idx: int, spawn_pos: Vector2) -> BaseFig
 	return fighter
 
 func _process(delta: float) -> void:
-	if match_ended or not match_started:
+	if match_ended or round_ending or not match_started:
 		return
 	match_time = maxf(0.0, match_time - delta)
 	if hud and hud.has_method("set_timer_value"):
@@ -139,41 +155,15 @@ func _process(delta: float) -> void:
 		_finish_by_timeout()
 
 func _on_fighter_ko(loser: BaseFighter, _killer: BaseFighter, by_ultimate: bool) -> void:
-	if match_ended:
+	if match_ended or round_ending:
 		return
-	match_ended = true
-	if p1:
-		p1.battle_locked = true
-	if p2:
-		p2.battle_locked = true
-
 	var winner: BaseFighter = p2 if loser == p1 else p1
-	if by_ultimate and winner and winner.fighter_id == "enfj" and vfx:
-		var t1 := get_tree().create_timer(0.75)
-		t1.timeout.connect(func() -> void:
-			if is_instance_valid(vfx):
-				vfx.play_empathy_finisher(winner.fighter_name, func() -> void:
-					if is_instance_valid(hud) and hud.has_method("show_ko_overlay"):
-						hud.show_ko_overlay(winner, "ULTIMATE FINISH!")
-				)
-		)
-	else:
-		var t2 := get_tree().create_timer(1.2)
-		t2.timeout.connect(func() -> void:
-			if is_instance_valid(hud) and hud.has_method("show_ko_overlay"):
-				hud.show_ko_overlay(winner, "K.O.!")
-		)
+	_finish_round(winner, "ULTIMATE FINISH!" if by_ultimate else "K.O.!", by_ultimate)
 
 func _finish_by_timeout() -> void:
-	if match_ended:
+	if match_ended or round_ending:
 		return
-	match_ended = true
-	if p1:
-		p1.battle_locked = true
-	if p2:
-		p2.battle_locked = true
 	AudioManager.play_sfx("ko", -2.0)
-
 	var p1_ratio: float = float(p1.hp) / maxf(1.0, float(p1.max_hp)) if p1 else 0.0
 	var p2_ratio: float = float(p2.hp) / maxf(1.0, float(p2.max_hp)) if p2 else 0.0
 	var winner: BaseFighter = null
@@ -181,5 +171,61 @@ func _finish_by_timeout() -> void:
 		winner = p1
 	elif p2_ratio > p1_ratio:
 		winner = p2
-	if hud and hud.has_method("show_ko_overlay"):
-		hud.show_ko_overlay(winner, "TIME UP!")
+	_finish_round(winner, "TIME UP!", false)
+
+func _finish_round(winner: BaseFighter, reason: String, by_ultimate: bool) -> void:
+	round_ending = true
+	match_started = false
+	if p1:
+		p1.battle_locked = true
+	if p2:
+		p2.battle_locked = true
+
+	if winner == p1:
+		GameManager.p1_rounds += 1
+	elif winner == p2:
+		GameManager.p2_rounds += 1
+	if hud and hud.has_method("set_round_scores"):
+		hud.set_round_scores(GameManager.p1_rounds, GameManager.p2_rounds)
+
+	var series_done: bool = (GameManager.p1_rounds >= GameManager.rounds_to_win) or (GameManager.p2_rounds >= GameManager.rounds_to_win)
+	if series_done:
+		match_ended = true
+		AudioManager.stop_bgm()
+		if by_ultimate and winner and winner.fighter_id == "enfj" and vfx:
+			var t1 := get_tree().create_timer(0.75)
+			t1.timeout.connect(func() -> void:
+				if is_instance_valid(vfx):
+					vfx.play_empathy_finisher(winner.fighter_name, func() -> void:
+						if is_instance_valid(hud) and hud.has_method("show_ko_overlay"):
+							hud.show_ko_overlay(winner, "ULTIMATE FINISH!")
+					)
+			)
+		else:
+			var t2 := get_tree().create_timer(1.2)
+			t2.timeout.connect(func() -> void:
+				if is_instance_valid(hud) and hud.has_method("show_ko_overlay"):
+					hud.show_ko_overlay(winner, reason)
+			)
+	else:
+		# BO3 下一回合准备：保留 30% EP 继承，重置血量、护盾、位置与场上道具
+		var banner_text: String = ("%s 拿下本局!" % winner.fighter_name) if winner else "本局平手!"
+		if hud and hud.has_method("show_round_banner"):
+			hud.show_round_banner(banner_text, winner.theme_color if winner else Color("#38bdf8"))
+		var t_next := get_tree().create_timer(1.75)
+		t_next.timeout.connect(func() -> void:
+			if match_ended or not is_instance_valid(self):
+				return
+			for item in get_tree().get_nodes_in_group("arena_items"):
+				if is_instance_valid(item):
+					item.queue_free()
+			GameManager.current_round += 1
+			match_time = MATCH_DURATION
+			if hud and hud.has_method("set_timer_value"):
+				hud.set_timer_value(int(MATCH_DURATION))
+			if is_instance_valid(p1):
+				p1.reset_for_new_round(p1_spawn_pos, 0.3)
+			if is_instance_valid(p2):
+				p2.reset_for_new_round(p2_spawn_pos, 0.3)
+			_play_round_intro()
+		)

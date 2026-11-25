@@ -39,6 +39,14 @@ var current_combo_hits: int = 0
 var current_combo_damage: int = 0
 var _combo_expire_timer: float = 0.0
 
+# 传统大乱斗深度机制：护盾耐久/破防、快落/空砸、墙角弹墙、受身
+var shield_hp: float = 100.0
+var shield_broken_timer: float = 0.0
+var fast_falling: bool = false
+var air_slamming: bool = false
+var _tech_window_timer: float = 0.0
+var _wall_bounced_in_stun: bool = false
+
 var dash_timer: float = 0.0
 var dash_cd: float = 0.0
 var dash_dir: int = 1
@@ -183,7 +191,57 @@ func spawn_slash_arc(start_deg: float, end_deg: float, radius: float, color: Col
 		vfx.spawn_slash_arc(global_position + Vector2(facing * 20.0, -56.0), start_deg, end_deg, radius, color, duration, facing)
 
 func get_active_buff_status() -> String:
+	if shield_broken_timer > 0.0:
+		return "破防眩晕 %.1fs" % shield_broken_timer
 	return ""
+
+func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void:
+	hp = max_hp
+	ep = clampf(ep * keep_ep_ratio, 0.0, 100.0)
+	shield_hp = 100.0
+	shield_broken_timer = 0.0
+	is_ko = false
+	guarding = false
+	charging_slot = ""
+	charge_elapsed = 0.0
+	charge_level = 1
+	_last_charge_level = 1
+	fast_falling = false
+	air_slamming = false
+	_tech_window_timer = 0.0
+	_wall_bounced_in_stun = false
+	hitstun_timer = 0.0
+	hit_flash_timer = 0.0
+	block_hit_timer = 0.0
+	dash_timer = 0.0
+	dash_cd = 0.0
+	invincible_timer = 0.0
+	super_armor_timer = 0.0
+	basic_cd = 0.0
+	skill1_cd = 0.0
+	skill2_cd = 0.0
+	action_anim_timer = 0.0
+	action_anim_state = ""
+	can_cancel_attack = false
+	can_hit_cancel = false
+	isfp_light_active = false
+	light_attack_hit_registered = false
+	current_combo_hits = 0
+	current_combo_damage = 0
+	_combo_expire_timer = 0.0
+	GameManager.combo_updated.emit(player_index, 0, 0)
+	velocity = Vector2.ZERO
+	global_position = spawn_pos
+	facing = 1 if player_index == 1 else -1
+	_update_facing_visual()
+	if sprite and sprite.material is ShaderMaterial:
+		(sprite.material as ShaderMaterial).set_shader_parameter("flash_amount", 0.0)
+	if sprite:
+		sprite.offset = Vector2.ZERO
+	if hitbox_col:
+		hitbox_col.disabled = true
+	_play_anim("idle", true)
+	queue_redraw()
 
 func _play_anim(state_name: String, force_reset: bool = false) -> void:
 	if rig != null and rig.visible:
@@ -359,6 +417,13 @@ func _physics_process(delta: float) -> void:
 	jump_buffer_timer = maxf(0.0, jump_buffer_timer - delta)
 	attack_buffer_timer = maxf(0.0, attack_buffer_timer - delta)
 	parry_window_timer = maxf(0.0, parry_window_timer - delta)
+	_tech_window_timer = maxf(0.0, _tech_window_timer - delta)
+	if hitstun_timer <= 0.0:
+		_wall_bounced_in_stun = false
+	if shield_broken_timer > 0.0:
+		shield_broken_timer = maxf(0.0, shield_broken_timer - delta)
+		if shield_broken_timer <= 0.0:
+			shield_hp = 55.0
 
 	if _combo_expire_timer > 0.0:
 		_combo_expire_timer = maxf(0.0, _combo_expire_timer - delta)
@@ -420,11 +485,15 @@ func _physics_process(delta: float) -> void:
 		air_jumps_left = 1
 
 	var inp: Dictionary = _read_inputs()
-	var can_act: bool = hitstun_timer <= 0.0
+	var can_act: bool = hitstun_timer <= 0.0 and shield_broken_timer <= 0.0
 	var horiz: float = float(inp["horiz"])
 	var guard_held: bool = bool(inp["guard_held"])
 	var up_pressed: bool = bool(inp["up_just"])
 	var up_held: bool = bool(inp["up_held"])
+
+	# 受击硬直期间按下闪避键（L/3）预存受身窗口，落地瞬间触发无敌受身翻滚
+	if hitstun_timer > 0.0 and bool(inp["dash_just"]):
+		_tech_window_timer = 0.18
 
 	if up_pressed:
 		jump_buffer_timer = 0.12
@@ -435,7 +504,7 @@ func _physics_process(delta: float) -> void:
 		attack_buffer_type = "heavy"
 		attack_buffer_timer = 0.14
 
-	if guard_held and not _was_guard_held and is_on_floor() and can_act:
+	if guard_held and not _was_guard_held and is_on_floor() and can_act and shield_hp > 0.0:
 		parry_window_timer = 0.14
 	_was_guard_held = guard_held
 
@@ -459,12 +528,29 @@ func _physics_process(delta: float) -> void:
 			action_anim_state = ""
 			can_cancel_attack = false
 
-		# 2. 单向平台下+跳快速穿落
+		# 2. 单向平台下+跳快速穿落 / 护盾防御（带护盾耐久消耗与破防）
 		if is_on_floor() and guard_held and up_pressed and global_position.y < 520.0:
 			global_position.y += 8.0
 			jump_buffer_timer = 0.0
 		else:
-			guarding = is_on_floor() and guard_held and dash_timer <= 0.0
+			guarding = is_on_floor() and guard_held and dash_timer <= 0.0 and shield_hp > 0.0 and shield_broken_timer <= 0.0
+
+		# 2.5 空中快速下落（Fast-Fall）与空中下砸（Down-Slam：空中 S/↓ + 重击）
+		if not is_on_floor() and charging_slot == "" and dash_timer <= 0.0:
+			if guard_held and bool(inp["heavy_just"]) and not air_slamming and basic_cd <= 0.0:
+				air_slamming = true
+				fast_falling = false
+				attack_buffer_timer = 0.0
+				basic_cd = 0.55
+				action_anim_state = "heavy"
+				action_anim_timer = 0.45
+				velocity = Vector2(facing * 120.0, 960.0)
+				trigger_squash(0.76, 1.30)
+				_play_anim("heavy", true)
+				AudioManager.play_sfx("air_slam", -2.5)
+			elif guard_held and velocity.y > 40.0 and not fast_falling and not air_slamming:
+				fast_falling = true
+				velocity.y = maxf(velocity.y, 460.0)
 
 		# 3. 冲刺 / 闪避（L / 3）
 		if bool(inp["dash_just"]) and dash_cd <= 0.0 and not guarding:
@@ -557,19 +643,69 @@ func _physics_process(delta: float) -> void:
 				_perform_heavy_attack()
 	else:
 		guarding = false
-		velocity.x = move_toward(velocity.x, 0.0, 700.0 * delta)
+		# 空中受击方向影响（DI）：受击硬直时按左右方向微调击飞轨迹
+		if hitstun_timer > 0.0 and horiz != 0.0:
+			velocity.x += horiz * 280.0 * delta
+		velocity.x = move_toward(velocity.x, 0.0, 620.0 * delta)
 
-	# 重力与移动碰撞
+	# 护盾耐久消耗与自动恢复
+	if guarding:
+		shield_hp = maxf(0.0, shield_hp - 18.0 * delta)
+		if shield_hp <= 0.0:
+			_trigger_shield_break()
+	elif shield_broken_timer <= 0.0:
+		shield_hp = minf(100.0, shield_hp + 16.0 * delta)
+
+	# 重力与移动碰撞（支持快落 1.65x 与空砸 1.35x 重力）
 	if not is_on_floor():
-		velocity.y += gravity_force * delta
+		var grav_mult: float = 1.65 if fast_falling else (1.35 if air_slamming else 1.0)
+		velocity.y += gravity_force * grav_mult * delta
 	move_and_slide()
+
+	# 墙角弹墙（Wall Bounce）：高速受击撞到舞台左右边界时触发反弹连段机会
+	if hitstun_timer > 0.0 and not _wall_bounced_in_stun and (global_position.x <= 224.0 or global_position.x >= 1576.0) and absf(velocity.x) > 340.0:
+		_wall_bounced_in_stun = true
+		velocity.x = -velocity.x * 0.72
+		velocity.y = minf(velocity.y, -280.0)
+		hitstun_timer += 0.16
+		trigger_squash(0.75, 1.28)
+		AudioManager.play_sfx("wall_bounce", -2.0)
+		GameManager.trigger_shake(7.5, 0.14, Vector2(signf(velocity.x), 0.0))
+		var wb_vfx := BattleVFX.get_current(get_tree())
+		if wb_vfx:
+			var wx: float = 224.0 if global_position.x <= 224.0 else 1576.0
+			wb_vfx.spawn_shockwave_ring(Vector2(wx, global_position.y - 48.0), Color("#38bdf8"), 12.0, 96.0, 0.25, 5.0)
+			wb_vfx.spawn_floating_text(global_position + Vector2(0.0, -108.0), "WALL BOUNCE!", Color("#38bdf8"), 1.15)
 	global_position.x = clampf(global_position.x, 220.0, 1580.0)
 
-	# 落地反馈检测
+	# 落地反馈检测（空砸冲击波 / 受身无敌翻滚 / 普通落地）
 	var on_floor_now: bool = is_on_floor()
 	if on_floor_now and not _was_on_floor:
-		landing_timer = 0.14
-		trigger_squash(1.18, 0.82)
+		fast_falling = false
+		if air_slamming:
+			air_slamming = false
+			landing_timer = 0.22
+			trigger_squash(1.36, 0.68)
+			_trigger_air_slam_impact()
+		elif hitstun_timer > 0.0 and _tech_window_timer > 0.0:
+			_tech_window_timer = 0.0
+			hitstun_timer = 0.0
+			invincible_timer = 0.28
+			var roll_dir: int = int(signf(horiz)) if horiz != 0.0 else -facing
+			dash_dir = roll_dir
+			dash_timer = 0.18
+			velocity = Vector2(float(roll_dir) * 420.0, 0.0)
+			trigger_squash(1.24, 0.80)
+			AudioManager.play_sfx("tech_roll", -2.5)
+			var tech_vfx := BattleVFX.get_current(get_tree())
+			if tech_vfx:
+				tech_vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -24.0), Color("#34d399"), 10.0, 74.0, 0.22, 4.0)
+				tech_vfx.spawn_floating_text(global_position + Vector2(0.0, -96.0), "受身 TECH!", Color("#34d399"), 1.08)
+				if sprite and sprite.visible:
+					tech_vfx.spawn_ghost(sprite, Color("#34d399"), 0.24)
+		else:
+			landing_timer = 0.14
+			trigger_squash(1.18, 0.82)
 	_was_on_floor = on_floor_now
 
 	# 60fps 2D 挤压拉伸、呼吸律动与运动前倾（脚底锚定不离地）
@@ -829,35 +965,78 @@ func register_combo_hit(dealt_damage: int) -> void:
 	current_combo_hits += 1
 	current_combo_damage += dealt_damage
 	_combo_expire_timer = 1.65
+	GameManager.record_stat(player_index, "max_combo", current_combo_hits)
 	GameManager.combo_updated.emit(player_index, current_combo_hits, current_combo_damage)
+
+func _trigger_shield_break() -> void:
+	if shield_broken_timer > 0.0:
+		return
+	guarding = false
+	shield_hp = 0.0
+	shield_broken_timer = 1.8
+	hitstun_timer = maxf(hitstun_timer, 0.4)
+	velocity = Vector2(-facing * 180.0, -240.0)
+	AudioManager.play_sfx("shield_break", -1.5)
+	GameManager.trigger_hitstop(0.10)
+	GameManager.trigger_shake(10.0, 0.20, Vector2(0.0, -1.0))
+	var vfx := BattleVFX.get_current(get_tree())
+	if vfx:
+		vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#ef4444"), 16.0, 138.0, 0.34, 6.0)
+		vfx.spawn_hit_particles(global_position + Vector2(0.0, -48.0), Color("#fca5a5"), 22, 360.0)
+		vfx.spawn_floating_text(global_position + Vector2(0.0, -118.0), "破防! SHIELD BREAK!", Color("#ef4444"), 1.32)
+
+func _trigger_air_slam_impact() -> void:
+	AudioManager.play_sfx("hit_heavy", -1.5, 0.84)
+	GameManager.trigger_shake(9.5, 0.18, Vector2(0.0, 1.0))
+	var vfx := BattleVFX.get_current(get_tree())
+	if vfx:
+		vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -6.0), Color("#facc15"), 18.0, 155.0, 0.30, 6.5)
+		vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -6.0), theme_color, 10.0, 110.0, 0.24, 4.5)
+		vfx.spawn_hit_particles(global_position + Vector2(0.0, -12.0), Color("#fde047"), 18, 340.0)
+		vfx.spawn_floating_text(global_position + Vector2(0.0, -104.0), "重坠震地!", Color("#fde047"), 1.08)
+	for node in get_tree().get_nodes_in_group("fighters"):
+		if node == self or not (node is BaseFighter):
+			continue
+		var target := node as BaseFighter
+		if target.is_ko:
+			continue
+		var diff: Vector2 = target.global_position - global_position
+		if absf(diff.x) <= 145.0 and absf(diff.y) <= 95.0:
+			var push_x: float = signf(diff.x) if absf(diff.x) > 4.0 else float(facing)
+			target.take_damage(14, Vector2(push_x * 340.0, -390.0), self, false)
 
 func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false) -> void:
 	if is_ko or invincible_timer > 0.0:
 		return
+	var eff_amount: int = amount
+	var eff_kb: Vector2 = knockback
 	var vfx := BattleVFX.get_current(get_tree())
 	var hit_pos: Vector2 = global_position + Vector2(0.0, -52.0)
 	var from_front: bool = attacker == null or int(signf(attacker.global_position.x - global_position.x)) == facing
 
-	# 完美格挡（Perfect Parry）：按下防御瞬间 0.14 秒内受击 -> 0 伤 + 18 EP + 弹反对手！
+	# 完美格挡（Perfect Parry）：按下防御瞬间 0.14 秒内受击 -> 0 伤 + 18 EP + 恢复护盾 + 弹反对手！
 	if guarding and from_front and not is_ultimate and parry_window_timer > 0.0:
 		parry_window_timer = 0.0
 		ep = minf(100.0, ep + 18.0)
+		shield_hp = minf(100.0, shield_hp + 20.0)
 		block_hit_timer = 0.16
+		GameManager.record_stat(player_index, "parries", 1)
 		AudioManager.play_sfx("parry", -1.5)
 		if attacker:
-			attacker.velocity = Vector2(-signf(knockback.x) * 320.0, -140.0)
+			attacker.velocity = Vector2(-signf(eff_kb.x) * 320.0, -140.0)
 			attacker.hitstun_timer = maxf(attacker.hitstun_timer, 0.26)
 		if vfx:
 			vfx.spawn_hit_fx(hit_pos + Vector2(facing * 20.0, 0.0), Color("#fde047"), true, false)
 			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -48.0), "完美格挡! +18 EP", Color("#fde047"), 1.18)
 		GameManager.trigger_hitstop(0.11)
-		GameManager.trigger_shake(7.0, 0.14, Vector2(signf(knockback.x), 0.0))
+		GameManager.trigger_shake(7.0, 0.14, Vector2(signf(eff_kb.x), 0.0))
 		return
 
 	if guarding and from_front and not is_ultimate:
-		var chip: int = maxi(1, int(round(amount * 0.3)))
+		var chip: int = maxi(1, int(round(eff_amount * 0.3)))
 		hp = maxi(0, hp - chip)
-		velocity.x = knockback.x * 0.25
+		shield_hp = maxf(0.0, shield_hp - float(eff_amount) * 2.2)
+		velocity.x = eff_kb.x * 0.25
 		block_hit_timer = 0.18
 		AudioManager.play_sfx("block", -2.5, randf_range(0.95, 1.08))
 		if vfx:
@@ -866,26 +1045,30 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		# 普攻命中防御状态顿帧 2 帧（约 0.033s）
 		var block_hitstop: float = 0.033 if (attacker and attacker.action_anim_state == "light") else 0.05
 		GameManager.trigger_hitstop(block_hitstop)
-		GameManager.trigger_shake(3.0, 0.07, Vector2(signf(knockback.x), 0.0))
+		GameManager.trigger_shake(3.0, 0.07, Vector2(signf(eff_kb.x), 0.0))
 		if hp <= 0:
 			_trigger_ko(attacker, false)
+		elif shield_hp <= 0.0:
+			_trigger_shield_break()
 		return
 
 	# 连击伤害递减与防无限连击退递增（Pushback Scaling 防止无限压制）
-	var scaled_amount: int = amount
+	var scaled_amount: int = eff_amount
 	var pushback_mult: float = 1.0
 	if attacker and not is_ultimate and attacker.current_combo_hits >= 1:
 		# 连续命中多次普攻时，逐步提升受击方水平击退距离，避免墙角无限循环
 		pushback_mult = 1.0 + float(attacker.current_combo_hits - 1) * 0.18
 		if attacker.current_combo_hits >= 2:
 			var mult: float = maxf(0.55, 1.0 - float(attacker.current_combo_hits - 1) * 0.07)
-			scaled_amount = maxi(2, int(round(float(amount) * mult)))
+			scaled_amount = maxi(2, int(round(float(eff_amount) * mult)))
 
 	# 霸体状态（Super Armor）：承受 70% 伤害但不被打断硬直或击飞
 	if super_armor_timer > 0.0 and not is_ultimate:
 		var armor_dmg: int = maxi(1, int(round(float(scaled_amount) * 0.7)))
 		hp = maxi(0, hp - armor_dmg)
 		ep = minf(100.0, ep + armor_dmg * 0.9)
+		if attacker:
+			GameManager.record_stat(attacker.player_index, "damage", armor_dmg)
 		hit_flash_timer = 0.09
 		AudioManager.play_sfx("block", -3.0, 0.85)
 		if vfx:
@@ -902,7 +1085,8 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 	if attacker:
 		attacker.ep = minf(100.0, attacker.ep + scaled_amount * (0.0 if is_ultimate else 1.1))
 		attacker.register_combo_hit(scaled_amount)
-	velocity = Vector2(knockback.x * pushback_mult, knockback.y)
+		GameManager.record_stat(attacker.player_index, "damage", scaled_amount)
+	velocity = Vector2(eff_kb.x * pushback_mult, eff_kb.y)
 	# 受击硬直：普攻 10-12 帧（约 0.18s-0.20s）；重击 0.22s；奥义 0.28s
 	hitstun_timer = 0.28 if is_ultimate else (0.22 if is_heavy else (0.18 if is_light else 0.15))
 	# 受击闪白（Hit Flash）：普攻 2 帧（约 0.033s）
@@ -918,7 +1102,7 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 	# 微震屏：普攻振幅 2.5px，持续 3-4 帧（约 0.06s）
 	var shake_amp: float = 13.0 if is_ultimate else (9.0 if is_heavy else (2.5 if is_light else 4.5))
 	var shake_dur: float = 0.22 if is_ultimate else (0.16 if is_heavy else (0.06 if is_light else 0.1))
-	GameManager.trigger_shake(shake_amp, shake_dur, Vector2(signf(knockback.x), -0.25))
+	GameManager.trigger_shake(shake_amp, shake_dur, Vector2(signf(eff_kb.x), -0.25))
 	if hp <= 0:
 		_trigger_ko(attacker, is_ultimate)
 
@@ -964,6 +1148,21 @@ func _draw() -> void:
 	if charging_slot != "" and not is_ko and not _sheet_textures.has(charging_slot + "_charge"):
 		var col := Color("#facc15") if charge_level >= 3 else (Color("#38bdf8") if charge_level == 2 else theme_color)
 		draw_arc(Vector2(0.0, -48.0), 46.0, 0.0, TAU * minf(1.0, charge_elapsed / 1.05), 24, col, 4.0)
+
+	# 破防眩晕：头顶旋转金星提示
+	if shield_broken_timer > 0.0 and not is_ko:
+		var t_dizzy: float = _breath_time * 6.5
+		for i in range(3):
+			var ang: float = t_dizzy + float(i) * (TAU / 3.0)
+			var star_pos := Vector2(cos(ang) * 26.0, -target_sprite_height - 10.0 + sin(ang) * 7.0)
+			draw_circle(star_pos, 5.5, Color("#facc15", 0.95))
+			draw_circle(star_pos, 2.5, Color("#ffffff", 0.95))
+
+	# 快速下落 / 空砸风压线
+	if (fast_falling or air_slamming) and not is_on_floor() and not is_ko:
+		var streak_col := Color("#fde047", 0.72) if air_slamming else Color("#e2e8f0", 0.48)
+		draw_line(Vector2(-24.0, -86.0), Vector2(-24.0, -124.0), streak_col, 2.5)
+		draw_line(Vector2(24.0, -86.0), Vector2(24.0, -124.0), streak_col, 2.5)
 
 func _on_hitbox_area_entered(area: Area2D) -> void:
 	var target = area.owner

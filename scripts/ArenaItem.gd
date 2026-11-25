@@ -93,6 +93,7 @@ func _physics_process(delta: float) -> void:
 
 func _pickup(f: BaseFighter) -> void:
 	_consumed = true
+	GameManager.record_stat(f.player_index, "items", 1)
 	AudioManager.play_sfx("item_pickup", -2.5)
 	var vfx := BattleVFX.get_current(get_tree())
 	if kind == Kind.ENERGY_CRYSTAL:
