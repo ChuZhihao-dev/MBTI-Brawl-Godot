@@ -12,11 +12,13 @@ var match_time: float = MATCH_DURATION
 var match_started: bool = false
 var round_ending: bool = false
 var match_ended: bool = false
+var practice_mode: bool = false
 
 @onready var camera: Camera2D = $SmashCamera2D
 @onready var hud: CanvasLayer = $HUD
 
 func _ready() -> void:
+	practice_mode = GameManager.battle_mode == "practice"
 	GameManager.is_pause_menu_open = false
 	GameManager.hitstop_timer = 0.0
 	GameManager.reset_match_state()
@@ -57,10 +59,11 @@ func _ready() -> void:
 	add_child(right_geyser)
 
 	# 中央顶层悬浮台随机道具与定时炸弹刷新器
-	var spawner := ArenaItemSpawner.new()
-	spawner.name = "ArenaItemSpawner"
-	spawner.spawn_position = Vector2(900.0, 244.0)
-	add_child(spawner)
+	if not practice_mode:
+		var spawner := ArenaItemSpawner.new()
+		spawner.name = "ArenaItemSpawner"
+		spawner.spawn_position = Vector2(900.0, 244.0)
+		add_child(spawner)
 
 	p1_spawn_pos = Vector2(580.0, 550.0)
 	p2_spawn_pos = Vector2(1210.0, 550.0)
@@ -75,14 +78,14 @@ func _ready() -> void:
 		remove_child(old_p2)
 		old_p2.queue_free()
 
+	if practice_mode:
+		p1_spawn_pos.x = 810.0
+		p2_spawn_pos.x = 990.0
 	p1 = _spawn_fighter(GameManager.selected_p1, 1, p1_spawn_pos)
 	p2 = _spawn_fighter(GameManager.selected_p2, 2, p2_spawn_pos)
 
 	if GameManager.battle_mode == "ai":
-		p2_ai = FighterAI.new()
-		p2_ai.name = "P2_AI"
-		add_child(p2_ai)
-		p2_ai.setup(p2, p1, GameManager.ai_difficulty)
+		_spawn_p2_ai(GameManager.ai_difficulty)
 
 	if camera and camera.has_method("set_targets"):
 		camera.set_targets(p1, p2)
@@ -91,8 +94,39 @@ func _ready() -> void:
 	if hud and hud.has_method("set_round_scores"):
 		hud.set_round_scores(GameManager.p1_rounds, GameManager.p2_rounds)
 
-	# 开场 ROUND 1... FIGHT! 仪式感
-	_play_round_intro()
+	if practice_mode:
+		p1.practice_full_energy = true
+		p2.practice_full_energy = true
+		p1.ep = 100.0
+		p2.ep = 100.0
+		_set_practice_cooldowns(false)
+		p2.is_ai_controlled = true
+		hud.practice_cooldowns_toggled.connect(_set_practice_cooldowns)
+		hud.practice_combat_toggled.connect(_set_practice_combat)
+		match_started = true
+	else:
+		_play_round_intro()
+
+func _spawn_p2_ai(difficulty: String) -> void:
+	p2_ai = FighterAI.new()
+	p2_ai.name = "P2_AI"
+	add_child(p2_ai)
+	p2_ai.setup(p2, p1, difficulty)
+
+func _set_practice_cooldowns(enabled: bool) -> void:
+	p1.set_practice_skill_cooldowns(enabled)
+	p2.set_practice_skill_cooldowns(enabled)
+
+func _set_practice_combat(enabled: bool) -> void:
+	if enabled:
+		if not is_instance_valid(p2_ai):
+			_spawn_p2_ai("easy")
+	elif is_instance_valid(p2_ai):
+		p2_ai.set_physics_process(false)
+		remove_child(p2_ai)
+		p2_ai.queue_free()
+		p2_ai = null
+		p2.clear_practice_dummy_input()
 
 func _exit_tree() -> void:
 	AudioManager.stop_bgm()
@@ -146,7 +180,7 @@ func _spawn_fighter(fid: String, player_idx: int, spawn_pos: Vector2) -> BaseFig
 	return fighter
 
 func _process(delta: float) -> void:
-	if match_ended or round_ending or not match_started:
+	if practice_mode or match_ended or round_ending or not match_started:
 		return
 	match_time = maxf(0.0, match_time - delta)
 	if hud and hud.has_method("set_timer_value"):
@@ -155,10 +189,18 @@ func _process(delta: float) -> void:
 		_finish_by_timeout()
 
 func _on_fighter_ko(loser: BaseFighter, _killer: BaseFighter, by_ultimate: bool) -> void:
+	if practice_mode:
+		_respawn_practice_fighter.call_deferred(loser)
+		return
 	if match_ended or round_ending:
 		return
 	var winner: BaseFighter = p2 if loser == p1 else p1
 	_finish_round(winner, "ULTIMATE FINISH!" if by_ultimate else "K.O.!", by_ultimate)
+
+func _respawn_practice_fighter(fighter: BaseFighter) -> void:
+	if is_instance_valid(fighter) and fighter.is_ko:
+		var spawn_pos := p1_spawn_pos if fighter == p1 else p2_spawn_pos
+		fighter.reset_for_new_round(spawn_pos)
 
 func _finish_by_timeout() -> void:
 	if match_ended or round_ending:

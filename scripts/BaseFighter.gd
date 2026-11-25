@@ -1,6 +1,9 @@
 extends CharacterBody2D
 class_name BaseFighter
 
+const PaintBlobProjectileScene = preload("res://scripts/PaintBlobProjectile.gd")
+const PaintPuddleHazardScene = preload("res://scripts/PaintPuddleHazard.gd")
+
 signal ko_triggered(fighter: BaseFighter, killer: BaseFighter, by_ultimate: bool)
 
 @export var player_index: int = 1
@@ -24,6 +27,8 @@ var battle_locked: bool = false
 
 # AI 接管支持（任意角色自动支持 1P vs AI 对战）
 var is_ai_controlled: bool = false
+var practice_full_energy := false
+var practice_skip_skill_cooldowns := false
 var ai_input: Dictionary = {}
 
 # 战斗手感与进阶机制（二段跳、土狼时间、输入缓冲、完美格挡、连击统计）
@@ -64,8 +69,17 @@ var action_anim_state: String = ""
 var can_cancel_attack: bool = false
 var has_hit_target_in_attack: bool = false
 var light_attack_hit_registered: bool = false
+var heavy_attack_hit_registered: bool = false
 var isfp_startup_step_timer: float = 0.0
 var isfp_light_active: bool = false
+var isfp_heavy_active: bool = false
+var isfp_skill1_active: bool = false
+var isfp_skill1_projectile_spawned: bool = false
+var paint_slow_timer: float = 0.0
+var paint_slow_mult: float = 1.0
+var paint_slip_timer: float = 0.0
+var paint_slip_dir: float = 0.0
+var skill1_buffer_timer: float = 0.0
 var guarding: bool = false
 var basic_cd: float = 0.0
 var skill1_cd: float = 0.0
@@ -83,6 +97,8 @@ var _juice_rot: float = 0.0
 var _breath_time: float = 0.0
 
 # 三档蓄力状态机（U/4 与 I/5 通用）
+var _charge_particles: Array[Dictionary] = []
+var _charge_particle_timer: float = 0.0
 var charging_slot: String = ""
 var charge_elapsed: float = 0.0
 var charge_level: int = 1
@@ -96,6 +112,9 @@ var hitbox_active_timer: float = 0.0
 # 记录 BaseFighter 初始默认的 Hitbox 尺寸与偏移（供未定制角色的普攻使用）
 var default_hitbox_size: Vector2 = Vector2(48.0, 40.0)
 var default_hitbox_pos: Vector2 = Vector2(40.0, -48.0)
+
+var isfp_ultimate_owner: BaseFighter
+@onready var paint_ultimate = get_node_or_null("PaintUltimate")
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hitbox_col: CollisionShape2D = $Hitbox/CollisionShape2D
@@ -196,13 +215,18 @@ func get_active_buff_status() -> String:
 	return ""
 
 func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void:
+	if paint_ultimate != null:
+		paint_ultimate.finish()
+	isfp_ultimate_owner = null
 	hp = max_hp
-	ep = clampf(ep * keep_ep_ratio, 0.0, 100.0)
+	ep = 100.0 if practice_full_energy else clampf(ep * keep_ep_ratio, 0.0, 100.0)
 	shield_hp = 100.0
 	shield_broken_timer = 0.0
 	is_ko = false
 	guarding = false
 	charging_slot = ""
+	_charge_particles.clear()
+	_charge_particle_timer = 0.0
 	charge_elapsed = 0.0
 	charge_level = 1
 	_last_charge_level = 1
@@ -225,7 +249,16 @@ func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void
 	can_cancel_attack = false
 	can_hit_cancel = false
 	isfp_light_active = false
+	isfp_heavy_active = false
+	isfp_skill1_active = false
+	isfp_skill1_projectile_spawned = false
+	paint_slow_timer = 0.0
+	paint_slow_mult = 1.0
+	paint_slip_timer = 0.0
+	paint_slip_dir = 0.0
+	skill1_buffer_timer = 0.0
 	light_attack_hit_registered = false
+	heavy_attack_hit_registered = false
 	current_combo_hits = 0
 	current_combo_damage = 0
 	_combo_expire_timer = 0.0
@@ -249,6 +282,9 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 		return
 	# ----------------- 【AnimationPlayer 优先通道】 -----------------
 	if anim_player and anim_player.has_animation(state_name):
+		# 蓄力动画播完后保留末帧，直到战斗状态切换。
+		if fighter_id == "isfp" and state_name in ["skill1_charge", "skill1"] and anim_player.assigned_animation == state_name and not force_reset:
+			return
 		# 如果当前已经在播放这个动画，且没有要求强制重播，就让它继续播，不要每帧打断！
 		if anim_player.current_animation == state_name and anim_player.is_playing() and not force_reset:
 			return
@@ -268,8 +304,8 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 				# jump/fall 序列帧人物实际躯干占高 ~288px，统一缩放到与 stand(407px)/move(317px) 完全一致的视觉比例！
 				mult = sprite_scale_mult * (407.0 / 288.0)
 				y_off = -17.0
-			elif rows > 1.0 or tex_path.ends_with("move.png") or tex_path.ends_with("fighter_light.png") or state_name == "walk" or state_name == "light":
-				# move.png 与 fighter_light.png 躯干高度 ~313-318px / 362px
+			elif rows > 1.0 or tex_path.ends_with("move.png") or tex_path.ends_with("fighter_light.png") or tex_path.ends_with("fighter_thump.png") or tex_path.ends_with("u.png") or state_name == "walk" or state_name == "light" or state_name == "heavy" or state_name == "skill1" or state_name == "skill1_charge":
+				# move.png, fighter_light.png 与 fighter_thump.png 躯干高度 ~313-318px / 362px
 				mult = sprite_scale_mult * (407.0 / 724.0) / (318.0 / 362.0)
 				y_off = sprite_y_offset * 0.4
 			else:
@@ -335,6 +371,17 @@ func _advance_anim(delta: float) -> void:
 func _act(suffix: String) -> String:
 	return ("p1_" if player_index == 1 else "p2_") + suffix
 
+func _is_move_key_held(action: String) -> bool:
+	for event in InputMap.action_get_events(action):
+		var key := event as InputEventKey
+		if key == null:
+			continue
+		if key.physical_keycode != 0 and Input.is_physical_key_pressed(key.physical_keycode):
+			return true
+		if key.keycode != 0 and Input.is_key_pressed(key.keycode):
+			return true
+	return false
+
 func _read_inputs() -> Dictionary:
 	if is_ai_controlled:
 		return {
@@ -351,8 +398,23 @@ func _read_inputs() -> Dictionary:
 			"skill2_just": bool(ai_input.get("skill2_just", false)),
 			"ult_just": bool(ai_input.get("ult_just", false))
 		}
+	var left_action := _act("left")
+	var right_action := _act("right")
+	var filtered_horiz: float = 0.0
+	if player_index == 1:
+		# 按当前键位读取实际按住的方向，避免动作状态残留造成持续走动。
+		filtered_horiz = float(_is_move_key_held(right_action)) - float(_is_move_key_held(left_action))
+	else:
+		var is_left := Input.is_action_pressed(left_action)
+		var is_right := Input.is_action_pressed(right_action)
+		if is_left != is_right:
+			filtered_horiz = float(is_right) - float(is_left)
+		elif is_left:
+			var raw_horiz := Input.get_axis(left_action, right_action)
+			filtered_horiz = raw_horiz if absf(raw_horiz) > 0.15 else 0.0
+
 	return {
-		"horiz": Input.get_axis(_act("left"), _act("right")),
+		"horiz": filtered_horiz,
 		"up_held": Input.is_action_pressed(_act("up")),
 		"up_just": Input.is_action_just_pressed(_act("up")),
 		"guard_held": Input.is_action_pressed(_act("guard")),
@@ -366,14 +428,46 @@ func _read_inputs() -> Dictionary:
 		"ult_just": Input.is_action_just_pressed(_act("ult"))
 	}
 
+func set_practice_skill_cooldowns(enabled: bool) -> void:
+	practice_skip_skill_cooldowns = not enabled
+	if practice_skip_skill_cooldowns:
+		skill1_cd = 0.0
+		skill2_cd = 0.0
+
+func clear_practice_dummy_input() -> void:
+	ai_input.clear()
+	guarding = false
+	charging_slot = ""
+	_charge_particles.clear()
+	attack_buffer_timer = 0.0
+	jump_buffer_timer = 0.0
+	skill1_buffer_timer = 0.0
+	if dash_timer > 0.0:
+		dash_timer = 0.0
+		velocity.x = 0.0
+
 func _get_effective_move_speed() -> float:
-	return move_speed
+	var spd: float = move_speed
+	if paint_slow_timer > 0.0:
+		spd *= paint_slow_mult
+	return spd
 
 func _get_attack_speed_mult() -> float:
 	return 1.0
 
 func _get_melee_range_bonus() -> float:
 	return 0.0
+
+func _update_hit_flash(delta: float) -> void:
+	if hit_flash_timer <= 0.0:
+		return
+	hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
+	if rig != null and rig.visible:
+		rig.set_flash(1.0 if hit_flash_timer > 0.0 else 0.0, Color.WHITE)
+	elif sprite:
+		if sprite.material is ShaderMaterial:
+			sprite.material.set_shader_parameter("flash_amount", 1.0 if hit_flash_timer > 0.0 else 0.0)
+		sprite.offset.x = sin(Time.get_ticks_msec() * 0.09) * 5.0 if hit_flash_timer > 0.0 else 0.0
 
 func _physics_process(delta: float) -> void:
 	dash_timer = maxf(0.0, dash_timer - delta)
@@ -391,28 +485,56 @@ func _physics_process(delta: float) -> void:
 	skill1_cd = maxf(0.0, skill1_cd - delta)
 	skill2_cd = maxf(0.0, skill2_cd - delta)
 	action_anim_timer = maxf(0.0, action_anim_timer - delta)
+	skill1_buffer_timer = maxf(0.0, skill1_buffer_timer - delta)
+	if paint_slow_timer > 0.0:
+		paint_slow_timer = maxf(0.0, paint_slow_timer - delta)
+		if paint_slow_timer <= 0.0:
+			paint_slow_mult = 1.0
+	if paint_slip_timer > 0.0:
+		paint_slip_timer = maxf(0.0, paint_slip_timer - delta)
+		if is_on_floor():
+			velocity.x = move_toward(velocity.x, paint_slip_dir * 180.0, 900.0 * delta)
 	if isfp_startup_step_timer > 0.0:
 		isfp_startup_step_timer = maxf(0.0, isfp_startup_step_timer - delta)
 		if is_on_floor() and absf(velocity.x) < 220.0:
 			velocity.x = facing * 120.0
 
 	# ---------------------------------------------------------------
-	# 普攻判定生效窗口（Active：第 7-9 帧，约 0.10s - 0.15s）与取消窗口（Cancel Window）
+	# 攻击判定生效窗口（Active）与取消窗口（Cancel Window）
 	# ---------------------------------------------------------------
 	if action_anim_state == "light" and isfp_light_active:
 		var elapsed_time: float = 0.20 - action_anim_timer
-		# 第 7-9 帧（0.10s <= t <= 0.15s）：激活稳定单次攻击判定
+		# 第 7-9 帧（0.10s <= t <= 0.15s）：激活稳定单次轻击判定
 		if elapsed_time >= 0.10 and elapsed_time <= 0.15 and not light_attack_hit_registered:
 			_check_isfp_light_hitbox()
 		# 取消窗口：从第 8 帧（命中确认后）或后摇阶段（第 8-12 帧，t >= 0.116s）允许立即派生取消
 		if elapsed_time >= 0.116 or has_hit_target_in_attack:
 			can_cancel_attack = true
-	elif action_anim_state == "light" and has_hit_target_in_attack:
+	elif action_anim_state == "heavy" and isfp_heavy_active:
+		var elapsed_heavy: float = 0.38 - action_anim_timer
+		# 重击判定生效期（第 5-8 帧，0.17s <= t <= 0.31s）：向前重击覆盖
+		if elapsed_heavy >= 0.17 and elapsed_heavy <= 0.31 and not heavy_attack_hit_registered:
+			_check_isfp_heavy_hitbox()
+		# 重击取消窗口：命中确认后（On-Hit Cancel）或后摇阶段（第 10 帧起，t >= 0.33s）允许衔接 dash、技能与大招
+		if elapsed_heavy >= 0.33 or has_hit_target_in_attack:
+			can_cancel_attack = true
+	elif action_anim_state == "skill1" and isfp_skill1_active:
+		# 第 5-8 帧准时生成投射物
+		if (action_anim_timer <= 0.134 or isfp_skill1_projectile_spawned) and not isfp_skill1_projectile_spawned:
+			_spawn_isfp_paint_blob()
+		# 收招与取消（最后 3 帧，剩余时间 <= 0.05s 时对应第 10-12 帧）：开放提前取消窗口
+		if action_anim_timer <= 0.05:
+			can_cancel_attack = true
+	elif (action_anim_state == "light" or action_anim_state == "heavy" or action_anim_state == "skill1") and has_hit_target_in_attack:
 		can_cancel_attack = true
 	elif action_anim_timer <= 0.0:
 		can_cancel_attack = false
 		isfp_light_active = false
+		isfp_heavy_active = false
+		isfp_skill1_active = false
+		isfp_skill1_projectile_spawned = false
 		light_attack_hit_registered = false
+		heavy_attack_hit_registered = false
 	coyote_timer = maxf(0.0, coyote_timer - delta)
 	jump_buffer_timer = maxf(0.0, jump_buffer_timer - delta)
 	attack_buffer_timer = maxf(0.0, attack_buffer_timer - delta)
@@ -432,15 +554,14 @@ func _physics_process(delta: float) -> void:
 			current_combo_damage = 0
 			GameManager.combo_updated.emit(player_index, 0, 0)
 
-	if hit_flash_timer > 0.0:
-		hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
-		if rig != null and rig.visible:
-			rig.set_flash(1.0 if hit_flash_timer > 0.0 else 0.0, Color.WHITE)
-		else:
-			if sprite and sprite.material is ShaderMaterial:
-				sprite.material.set_shader_parameter("flash_amount", 1.0 if hit_flash_timer > 0.0 else 0.0)
-			if sprite:
-				sprite.offset.x = sin(Time.get_ticks_msec() * 0.09) * 5.0 if hit_flash_timer > 0.0 else 0.0
+	_update_hit_flash(delta)
+
+	if paint_ultimate != null and paint_ultimate.active:
+		return
+	if is_instance_valid(isfp_ultimate_owner) and not is_ko and not battle_locked:
+		_play_anim("hit")
+		queue_redraw()
+		return
 
 	# 攻击框生效时间倒计时，时间一到自动关闭 Hitbox
 	if hitbox_active_timer > 0.0:
@@ -503,26 +624,34 @@ func _physics_process(delta: float) -> void:
 	elif bool(inp["heavy_just"]):
 		attack_buffer_type = "heavy"
 		attack_buffer_timer = 0.14
+	if bool(inp["skill1_just"]):
+		skill1_buffer_timer = 0.10 # 4-5 帧预输入缓冲队列
 
 	if guard_held and not _was_guard_held and is_on_floor() and can_act and shield_hp > 0.0:
 		parry_window_timer = 0.14
 	_was_guard_held = guard_held
 
-	# 0. 必杀大招（O / 6，满 100 能量可释放）
+	# 0. 必杀大招（O / 6，满 100 能量可释放，可从普攻/重击命中确认取消中顺畅派生）
 	if can_act and charging_slot == "" and dash_timer <= 0.0 and ep >= 100.0 and bool(inp["ult_just"]):
-		ep = 0.0
+		if can_cancel_attack and (action_anim_state == "light" or action_anim_state == "heavy" or action_anim_state == "skill1"):
+			action_anim_timer = 0.0
+			action_anim_state = ""
+			can_cancel_attack = false
+		ep = 100.0 if practice_full_energy else 0.0
 		guarding = false
 		on_ultimate_cast()
-	# 1. 蓄力小技能处理（支持方向键派生，或由普攻取消窗口提前中断后摇派生）
+		if paint_ultimate != null and paint_ultimate.active:
+			return
+	# 1. 蓄力小技能处理（支持方向键派生，或由普攻/重击取消窗口提前中断后摇派生）
 	elif _process_charge_skill(delta, can_act, horiz, guard_held, up_held, inp):
-		if can_cancel_attack and action_anim_state == "light":
+		if can_cancel_attack and (action_anim_state == "light" or action_anim_state == "heavy" or action_anim_state == "skill1"):
 			action_anim_timer = 0.0
 			action_anim_state = ""
 			can_cancel_attack = false
 		velocity.x = move_toward(velocity.x, 0.0, 1400.0 * delta)
 	elif can_act:
-		# 普攻后摇取消窗口：允许立即取消并衔接 dash（闪避）
-		var allow_dash_cancel: bool = can_cancel_attack and action_anim_state == "light" and bool(inp["dash_just"])
+		# 攻击后摇取消窗口：允许立即取消并衔接 dash（闪避）
+		var allow_dash_cancel: bool = can_cancel_attack and (action_anim_state == "light" or action_anim_state == "heavy" or action_anim_state == "skill1") and bool(inp["dash_just"])
 		if allow_dash_cancel:
 			action_anim_timer = 0.0
 			action_anim_state = ""
@@ -588,21 +717,27 @@ func _physics_process(delta: float) -> void:
 					else:
 						vfx.spawn_ghost(sprite, theme_color, 0.22)
 		elif not guarding:
-			# 普攻前摇阶段（Startup 第 1-6 帧）允许角色微调朝向与微量惯性移动；其余攻击动作锁死转向
+			# 普攻前摇阶段（Startup 第 1-6 帧）与重击起手允许角色微调朝向与微量惯性移动；其余攻击动作锁死转向
 			var in_light_startup: bool = action_anim_state == "light" and isfp_light_active and (0.20 - action_anim_timer < 0.10)
-			var can_move_facing: bool = action_anim_timer <= 0.0 or in_light_startup
+			var in_heavy_startup: bool = action_anim_state == "heavy" and isfp_heavy_active and (0.38 - action_anim_timer < 0.12)
+			var in_skill1_startup: bool = action_anim_state == "skill1" and isfp_skill1_active and (0.20 - action_anim_timer < 0.067)
+			var can_move_facing: bool = action_anim_timer <= 0.0 or in_light_startup or in_heavy_startup or in_skill1_startup
 			if horiz != 0.0:
 				if can_move_facing:
 					facing = int(signf(horiz))
 					_update_facing_visual()
 				if action_anim_timer <= 0.0:
 					velocity.x = horiz * eff_speed
-				elif in_light_startup:
-					velocity.x = move_toward(velocity.x, horiz * eff_speed * 0.45, 900.0 * delta)
+				elif in_light_startup or in_heavy_startup or in_skill1_startup:
+					velocity.x = move_toward(velocity.x, horiz * eff_speed * 0.45, 1200.0 * delta)
 				else:
-					velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
+					velocity.x = move_toward(velocity.x, 0.0, 2400.0 * delta)
+			elif player_index == 1 and not is_ai_controlled and action_anim_timer <= 0.0:
+				velocity.x = 0.0
 			else:
-				velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
+				velocity.x = move_toward(velocity.x, 0.0, 2400.0 * delta)
+			if absf(velocity.x) < 5.0 and horiz == 0.0:
+				velocity.x = 0.0
 			# 地面跳（含土狼时间 + 跳跃缓冲）
 			if jump_buffer_timer > 0.0 and coyote_timer > 0.0:
 				velocity.y = -jump_force
@@ -629,9 +764,10 @@ func _physics_process(delta: float) -> void:
 
 		# 5. 普攻（J/1）与重击（K/2）（带预输入缓冲 + 命中取消重击派生）
 		var allow_light_cancel: bool = can_cancel_attack and action_anim_state == "light" and attack_buffer_timer > 0.0 and basic_cd <= 0.0
+		var allow_heavy_cancel: bool = can_cancel_attack and action_anim_state == "heavy" and attack_buffer_timer > 0.0 and basic_cd <= 0.0
 		var allow_hit_heavy_cancel: bool = can_hit_cancel and attack_buffer_timer > 0.0 and attack_buffer_type == "heavy"
-		if (not guarding and dash_timer <= 0.0 and basic_cd <= 0.0 and attack_buffer_timer > 0.0) or allow_light_cancel or allow_hit_heavy_cancel:
-			if allow_light_cancel or allow_hit_heavy_cancel:
+		if (not guarding and dash_timer <= 0.0 and basic_cd <= 0.0 and attack_buffer_timer > 0.0) or allow_light_cancel or allow_heavy_cancel or allow_hit_heavy_cancel:
+			if allow_light_cancel or allow_heavy_cancel or allow_hit_heavy_cancel:
 				action_anim_timer = 0.0
 				action_anim_state = ""
 				can_cancel_attack = false
@@ -722,17 +858,22 @@ func _physics_process(delta: float) -> void:
 
 	# 自动同步战斗精灵动画状态
 	_sync_animation_state()
-	_advance_anim(delta)
+	var isfp_skill1_pose: bool = fighter_id == "isfp" and anim_player != null and (
+		(charging_slot == "skill1" and anim_player.assigned_animation == "skill1_charge")
+		or (action_anim_timer > 0.0 and action_anim_state == "skill1" and anim_player.assigned_animation == "skill1")
+	)
+	if not isfp_skill1_pose:
+		_advance_anim(delta)
 
 	if sprite and sprite.visible:
-		var use_fake_breath: bool = _sheet_textures.is_empty() or (_current_anim == "idle" and int((_sheet_configs.get("idle", {}) as Dictionary).get("frames", 1)) <= 1)
+		var use_fake_breath: bool = not isfp_skill1_pose and (_sheet_textures.is_empty() or (_current_anim == "idle" and int((_sheet_configs.get("idle", {}) as Dictionary).get("frames", 1)) <= 1))
 		var breath_sy: float = 1.0 + sin(_breath_time * 3.8) * 0.025 if use_fake_breath else 1.0
 		var breath_sx: float = 1.0 - sin(_breath_time * 3.8) * 0.015 if use_fake_breath else 1.0
-		var final_sx: float = _juice_scale.x * breath_sx
-		var final_sy: float = _juice_scale.y * breath_sy
+		var final_sx: float = 1.0 if isfp_skill1_pose else _juice_scale.x * breath_sx
+		var final_sy: float = 1.0 if isfp_skill1_pose else _juice_scale.y * breath_sy
 		sprite.scale = Vector2(_base_sprite_scale.x * final_sx, _base_sprite_scale.y * final_sy)
 		sprite.position.y = -target_sprite_height * 0.5 * final_sy + 4.0
-		sprite.rotation = _juice_rot
+		sprite.rotation = 0.0 if isfp_skill1_pose else _juice_rot
 
 	queue_redraw()
 
@@ -740,8 +881,12 @@ func _sync_animation_state() -> void:
 	var has_rig: bool = rig != null and rig.visible
 	if hitstun_timer > 0.0 and (has_rig or _sheet_textures.has("hit")):
 		_play_anim("hit")
-	elif charging_slot != "" and _sheet_textures.has(charging_slot + "_charge"):
-		_play_anim(charging_slot + "_charge")
+	elif charging_slot != "":
+		var charge_anim_name := charging_slot + "_charge"
+		if anim_player and anim_player.has_animation(charge_anim_name):
+			_play_anim(charge_anim_name)
+		elif _sheet_textures.has(charge_anim_name):
+			_play_anim(charge_anim_name)
 	elif block_hit_timer > 0.0 and (has_rig or _sheet_textures.has("block_hit")):
 		_play_anim("block_hit")
 	elif dash_timer > 0.0:
@@ -806,14 +951,44 @@ func _check_isfp_light_hitbox() -> void:
 		can_cancel_attack = true
 
 func _perform_heavy_attack() -> void:
-	basic_cd = 0.48 / _get_attack_speed_mult()
-	action_anim_state = "heavy"
-	action_anim_timer = 0.36 / _get_attack_speed_mult()
-	_play_anim("heavy", true)
-	trigger_squash(1.20, 0.85)
-	spawn_slash_arc(-125.0, 55.0, 118.0, Color("#fde047"), 0.20)
-	AudioManager.play_sfx("swing_heavy", -4.0, randf_range(0.92, 1.06))
-	_perform_melee(13, Vector2(facing * 360.0, -210.0), true)
+	var is_isfp: bool = (fighter_id == "isfp") or (anim_player and anim_player.has_animation("heavy"))
+	has_hit_target_in_attack = false
+	can_cancel_attack = false
+	heavy_attack_hit_registered = false
+
+	if is_isfp:
+		# 不等长帧率节奏（总计 0.38s）：前摇蓄势(0.17s) -> 强力下劈判定(0.17-0.31s) -> 顺畅收招(0.31-0.38s)
+		action_anim_state = "heavy"
+		action_anim_timer = 0.38
+		basic_cd = 0.33 # 后摇阶段冷却解除，允许衔接预输入动作
+		isfp_heavy_active = true
+		isfp_startup_step_timer = 0.05 # 前摇前踏步补偿（防止贴身空挥）
+		if is_on_floor():
+			velocity.x = facing * 150.0
+		_play_anim("heavy", true)
+		trigger_squash(1.18, 0.82)
+		AudioManager.play_sfx("swing_heavy", -4.0, randf_range(0.92, 1.04))
+	else:
+		basic_cd = 0.48 / _get_attack_speed_mult()
+		action_anim_state = "heavy"
+		action_anim_timer = 0.36 / _get_attack_speed_mult()
+		isfp_heavy_active = false
+		_play_anim("heavy", true)
+		trigger_squash(1.20, 0.85)
+		spawn_slash_arc(-125.0, 55.0, 118.0, Color("#fde047"), 0.20)
+		AudioManager.play_sfx("swing_heavy", -4.0, randf_range(0.92, 1.06))
+		_perform_melee(13, Vector2(facing * 360.0, -210.0), true)
+
+func _check_isfp_heavy_hitbox() -> void:
+	if heavy_attack_hit_registered:
+		return
+	# fighter_thump 沉稳下劈打击，判定范围与特效宽度完全吻合（145px），带明显击退与浮空离地感
+	var hit: bool = _perform_melee(14, Vector2(facing * 340.0, -230.0), true, 145.0)
+	if hit:
+		heavy_attack_hit_registered = true
+		has_hit_target_in_attack = true
+		can_cancel_attack = true
+		can_hit_cancel = true
 
 func _process_charge_skill(delta: float, can_act: bool, horiz: float, guard_held: bool, up_held: bool, inp: Dictionary) -> bool:
 	if not can_act:
@@ -840,17 +1015,32 @@ func _process_charge_skill(delta: float, can_act: bool, horiz: float, guard_held
 			var vfx := BattleVFX.get_current(get_tree())
 			if vfx:
 				var ring_col := Color("#facc15") if charge_level >= 3 else Color("#38bdf8")
-				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), ring_col, 14.0, 74.0, 0.22, 4.0)
+				if charging_slot != "skill1" or fighter_id != "isfp":
+					vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), ring_col, 14.0, 74.0, 0.22, 4.0)
 				vfx.spawn_floating_text(global_position + Vector2(0.0, -110.0), "MAX 蓄力!" if charge_level >= 3 else "LV.2 蓄力!", ring_col, 0.92)
+
+		# ISFP U技能（Skill 1）彩色粒子不规则向笔尖聚拢效果更新
+		if charging_slot == "skill1" and (fighter_id == "isfp" or (anim_player and anim_player.has_animation("skill1_charge"))):
+			_update_isfp_charge_particles(delta)
+
 		if not held:
 			var slot := charging_slot
 			var lv := charge_level
 			var d := charge_dir
 			charging_slot = ""
+			_charge_particles.clear()
 			on_charge_skill_release(slot, lv, d)
+			if practice_skip_skill_cooldowns:
+				skill1_cd = 0.0
+				skill2_cd = 0.0
+			if fighter_id == "isfp" and slot == "skill1":
+				guarding = false
+				return true
 		return charging_slot != ""
 
-	if bool(inp["skill1_just"]) and skill1_cd <= 0.0:
+	var trigger_skill1: bool = (bool(inp["skill1_just"]) or skill1_buffer_timer > 0.0) and skill1_cd <= 0.0
+	if trigger_skill1:
+		skill1_buffer_timer = 0.0
 		charging_slot = "skill1"
 		charge_elapsed = 0.0
 		charge_level = 1
@@ -872,6 +1062,9 @@ func _process_charge_skill(delta: float, can_act: bool, horiz: float, guard_held
 func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 	var vfx := BattleVFX.get_current(get_tree())
 	if slot == "skill1":
+		if fighter_id == "isfp" or (anim_player and anim_player.has_animation("skill1")):
+			_perform_isfp_skill1(level, dir, true)
+			return
 		skill1_cd = 2.8
 		action_anim_state = "skill"
 		action_anim_timer = 0.42
@@ -911,7 +1104,13 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 		if level >= 2:
 			_perform_melee(8 + level * 3, Vector2(facing * 380.0, -220.0), true)
 
+func is_isfp_ultimate_invulnerable() -> bool:
+	return paint_ultimate != null and paint_ultimate.active and paint_ultimate.frame <= 4
+
 func on_ultimate_cast() -> void:
+	if paint_ultimate != null:
+		paint_ultimate.start()
+		return
 	AudioManager.play_sfx("ult_cast", -1.5)
 	invincible_timer = 0.65
 	action_anim_state = "heavy"
@@ -934,9 +1133,9 @@ func _perform_melee(damage: int, knockback: Vector2, is_heavy: bool, custom_rang
 		if not hitbox_shape.resource_local_to_scene:
 			hitbox_shape.resource_local_to_scene = true
 		if custom_range > 0.0:
-			hitbox_shape.size = Vector2(custom_range * 0.9, default_hitbox_size.y if not is_heavy else default_hitbox_size.y * 1.4)
+			hitbox_shape.size = Vector2(custom_range, default_hitbox_size.y if not is_heavy else default_hitbox_size.y * 1.5)
 			if hitbox_col:
-				hitbox_col.position = Vector2(custom_range * 0.55, default_hitbox_pos.y)
+				hitbox_col.position = Vector2(custom_range * 0.5, default_hitbox_pos.y)
 		else:
 			hitbox_shape.size = default_hitbox_size
 			if hitbox_col:
@@ -1006,8 +1205,9 @@ func _trigger_air_slam_impact() -> void:
 			target.take_damage(14, Vector2(push_x * 340.0, -390.0), self, false)
 
 func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false) -> void:
-	if is_ko or invincible_timer > 0.0:
+	if is_ko or hp <= 0 or invincible_timer > 0.0 or is_isfp_ultimate_invulnerable():
 		return
+	var paint_combo: bool = is_ultimate and is_instance_valid(attacker) and isfp_ultimate_owner == attacker
 	var eff_amount: int = amount
 	var eff_kb: Vector2 = knockback
 	var vfx := BattleVFX.get_current(get_tree())
@@ -1042,10 +1242,10 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		if vfx:
 			vfx.spawn_hit_fx(hit_pos + Vector2(facing * 20.0, 0.0), Color("#38bdf8"), false, true)
 			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -34.0), "格挡 -%d" % chip, Color("#7dd3fc"), 0.9)
-		# 普攻命中防御状态顿帧 2 帧（约 0.033s）
-		var block_hitstop: float = 0.033 if (attacker and attacker.action_anim_state == "light") else 0.05
+		# 防御顿帧分层：轻击命中防御 2 帧（0.033s）；重击命中防御 4 帧（0.067s）；高冲击/技能 0.08s
+		var block_hitstop: float = 0.033 if (attacker and attacker.action_anim_state == "light") else (0.067 if (attacker and attacker.action_anim_state == "heavy") else 0.08)
 		GameManager.trigger_hitstop(block_hitstop)
-		GameManager.trigger_shake(3.0, 0.07, Vector2(signf(eff_kb.x), 0.0))
+		GameManager.trigger_shake(4.0 if (attacker and attacker.action_anim_state == "heavy") else 2.5, 0.08, Vector2(signf(eff_kb.x), 0.0))
 		if hp <= 0:
 			_trigger_ko(attacker, false)
 		elif shield_hp <= 0.0:
@@ -1063,6 +1263,12 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 			scaled_amount = maxi(2, int(round(float(eff_amount) * mult)))
 
 	# 霸体状态（Super Armor）：承受 70% 伤害但不被打断硬直或击飞
+	# 若在技能前摇阶段被打断，则取消投射物生成并正常进入冷却
+	if action_anim_state == "skill1" and isfp_skill1_active and not isfp_skill1_projectile_spawned:
+		isfp_skill1_active = false
+		action_anim_state = ""
+		action_anim_timer = 0.0
+
 	if super_armor_timer > 0.0 and not is_ultimate:
 		var armor_dmg: int = maxi(1, int(round(float(scaled_amount) * 0.7)))
 		hp = maxi(0, hp - armor_dmg)
@@ -1079,7 +1285,7 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		return
 
 	var is_light: bool = attacker != null and attacker.action_anim_state == "light" and not is_ultimate
-	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate) and not is_light
+	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate or (attacker != null and attacker.action_anim_state == "heavy")) and not is_light
 	hp = maxi(0, hp - scaled_amount)
 	ep = minf(100.0, ep + scaled_amount * 0.9)
 	if attacker:
@@ -1087,21 +1293,30 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		attacker.register_combo_hit(scaled_amount)
 		GameManager.record_stat(attacker.player_index, "damage", scaled_amount)
 	velocity = Vector2(eff_kb.x * pushback_mult, eff_kb.y)
-	# 受击硬直：普攻 10-12 帧（约 0.18s-0.20s）；重击 0.22s；奥义 0.28s
-	hitstun_timer = 0.28 if is_ultimate else (0.22 if is_heavy else (0.18 if is_light else 0.15))
-	# 受击闪白（Hit Flash）：普攻 2 帧（约 0.033s）
-	hit_flash_timer = 0.18 if is_ultimate else (0.14 if is_heavy else (0.033 if is_light else 0.1))
-	trigger_squash(0.86, 1.15)
+	# 受击硬直：轻击 10-12 帧（约 0.18s-0.20s）；重击沉稳 14-15 帧（0.24s）；奥义 0.28s
+	hitstun_timer = 0.28 if is_ultimate else (0.24 if is_heavy else (0.18 if is_light else 0.15))
+	# 受击闪白（Hit Flash）：轻击 2 帧（0.033s）；重击 3 帧（0.05s）；奥义 0.18s
+	hit_flash_timer = 2.0 / 60.0 if paint_combo else (0.18 if is_ultimate else (0.05 if is_heavy else (0.033 if is_light else 0.1)))
+	if paint_combo and sprite and sprite.material is ShaderMaterial:
+		sprite.material.set_shader_parameter("flash_amount", 1.0)
+	trigger_squash(0.82, 1.22 if is_heavy else 1.15)
 	AudioManager.play_sfx("hit_heavy" if is_heavy else "hit_light", -2.0 if is_heavy else -4.0, randf_range(0.93, 1.08))
 	if vfx:
 		var fx_col: Color = attacker.theme_color if attacker else theme_color
-		vfx.spawn_hit_fx(hit_pos, fx_col, is_heavy, false)
+		var is_paint: bool = (attacker != null and attacker.fighter_id == "isfp")
+		vfx.spawn_hit_fx(hit_pos, fx_col, is_heavy and not paint_combo, false, is_paint)
 		vfx.spawn_floating_text(hit_pos + Vector2(0.0, -36.0), "-%d" % scaled_amount, Color("#fde047") if is_heavy else Color("#ffffff"), 1.25 if is_ultimate else (1.1 if is_heavy else 0.95))
-	# 顿帧（Hitstop）：普攻命中 3 帧（0.05s）；重击 0.085s；大招 0.11s
-	GameManager.trigger_hitstop(0.11 if is_ultimate else (0.085 if is_heavy else 0.05))
-	# 微震屏：普攻振幅 2.5px，持续 3-4 帧（约 0.06s）
-	var shake_amp: float = 13.0 if is_ultimate else (9.0 if is_heavy else (2.5 if is_light else 4.5))
-	var shake_dur: float = 0.22 if is_ultimate else (0.16 if is_heavy else (0.06 if is_light else 0.1))
+	if paint_combo:
+		if hp <= 0:
+			attacker.paint_ultimate.pending_ko = self
+		return
+	if paint_ultimate != null and paint_ultimate.active:
+		paint_ultimate.finish()
+	# 顿帧（Hitstop）：轻击 2-3 帧（0.05s）；重击分层 5 帧（0.083s）；大招 0.11s
+	GameManager.trigger_hitstop(0.11 if is_ultimate else (0.083 if is_heavy else 0.05))
+	# 镜头震屏：轻击克制轻巧（2.5px，0.06s）；重击沉稳有力（7.5px，0.14s）；大招震撼（13px，0.22s）
+	var shake_amp: float = 13.0 if is_ultimate else (7.5 if is_heavy else (2.5 if is_light else 4.5))
+	var shake_dur: float = 0.22 if is_ultimate else (0.14 if is_heavy else (0.06 if is_light else 0.1))
 	GameManager.trigger_shake(shake_amp, shake_dur, Vector2(signf(eff_kb.x), -0.25))
 	if hp <= 0:
 		_trigger_ko(attacker, is_ultimate)
@@ -1144,10 +1359,16 @@ func _draw() -> void:
 	if guarding and not is_ko and not _sheet_textures.has("guard"):
 		var g_col := Color("#fde047") if parry_window_timer > 0.0 else Color("#38bdf8")
 		draw_arc(Vector2(facing * 26.0, -48.0), 38.0, -0.9 if facing > 0 else PI - 0.9, 0.9 if facing > 0 else PI + 0.9, 16, g_col, 4.5 if parry_window_timer > 0.0 else 4.0)
-	# 仅在没有专属蓄力动画时显示默认蓄力圆环兜底；有专属蓄力原画（如 ENFJ 的 U/I）时不遮挡人物
-	if charging_slot != "" and not is_ko and not _sheet_textures.has(charging_slot + "_charge"):
+	# 仅在没有专属蓄力动画/特效时显示默认蓄力圆环兜底；ISFP使用笔尖聚拢彩色粒子，绝不显示圆圈进度条
+	var is_isfp_skill1_charge: bool = charging_slot == "skill1" and (fighter_id == "isfp" or (anim_player != null and anim_player.has_animation("skill1_charge")))
+	var has_charge_art: bool = is_isfp_skill1_charge or _sheet_textures.has(charging_slot + "_charge") or (anim_player != null and anim_player.has_animation(charging_slot + "_charge"))
+	if charging_slot != "" and not is_ko and not has_charge_art:
 		var col := Color("#facc15") if charge_level >= 3 else (Color("#38bdf8") if charge_level == 2 else theme_color)
 		draw_arc(Vector2(0.0, -48.0), 46.0, 0.0, TAU * minf(1.0, charge_elapsed / 1.05), 24, col, 4.0)
+
+	# 绘制 ISFP 笔尖聚拢彩色粒子与微弱光核
+	if is_isfp_skill1_charge and not is_ko:
+		_draw_isfp_charge_particles()
 
 	# 破防眩晕：头顶旋转金星提示
 	if shield_broken_timer > 0.0 and not is_ko:
@@ -1169,7 +1390,171 @@ func _on_hitbox_area_entered(area: Area2D) -> void:
 	if target != self and target is BaseFighter and not target.is_ko:
 		has_hit_target_in_attack = true
 		can_cancel_attack = true
+		can_hit_cancel = true
 		light_attack_hit_registered = true
+		heavy_attack_hit_registered = true
 		target.take_damage(current_attack_damage, current_attack_knockback, self, current_attack_is_ult)
 		if hitbox_col:
 			hitbox_col.set_deferred("disabled", true)
+
+var _pending_isfp_skill1_level: int = 1
+var _pending_isfp_skill1_dir: String = "neutral"
+
+func _perform_isfp_skill1(level: int, dir: String, from_charge: bool = false) -> void:
+	skill1_cd = 4.8 # 4.5-5.5 秒独立冷却时间
+	action_anim_state = "skill1"
+	isfp_skill1_active = true
+	isfp_skill1_projectile_spawned = false
+	can_cancel_attack = false
+	_pending_isfp_skill1_level = level
+	_pending_isfp_skill1_dir = dir
+
+	if from_charge:
+		# 蓄力松手后，直接无缝衔接第 5 帧动作（跳过前 4 帧蓄力动作，剩余 8 帧 = 0.1333s）
+		action_anim_timer = 0.1333333
+		_play_anim("skill1", true)
+		if anim_player and anim_player.has_animation("skill1"):
+			# 核心关键：直接推移到第 5 帧时间点（0.0667s），实现视觉帧与逻辑无缝顺畅续接！
+			anim_player.seek(0.0666667, true)
+		# 松手即出手：立即生成第 5 帧投射物
+		_spawn_isfp_paint_blob()
+	else:
+		action_anim_timer = 0.20 # 完整 12 帧时间轴
+		# 第 1-2 帧微弱惯性滑步，不锁死朝向
+		isfp_startup_step_timer = 0.034
+		if is_on_floor():
+			velocity.x = facing * 90.0
+		_play_anim("skill1", true)
+		trigger_squash(0.92, 1.08)
+
+	AudioManager.play_sfx("swing_light", -5.0, 1.1)
+
+func _spawn_isfp_paint_blob() -> void:
+	if isfp_skill1_projectile_spawned:
+		return
+	isfp_skill1_projectile_spawned = true
+
+	# 笔尖坐标：基于 ISFP 角色锚点，朝向翻转时 x 轴向外延伸
+	var tip_pos: Vector2 = global_position + Vector2(facing * 52.0, -56.0)
+
+	# 笔尖短促甩彩粒子，体现“随手一甩”的轻巧节奏
+	var vfx := BattleVFX.get_current(get_tree())
+	if vfx:
+		vfx.spawn_brush_tip_splatter(tip_pos, facing)
+
+	# 生成抛物线彩色颜料块
+	var blob := PaintBlobProjectileScene.new()
+	blob.owner_fighter = self
+	blob.global_position = tip_pos
+	blob.charge_level = _pending_isfp_skill1_level
+	blob.dir_param = _pending_isfp_skill1_dir
+
+	# 速度与方向派生配置（水平速度 vx 约 380-440，垂直初速度 vy 约 -260 ~ -320，重力 g 约 1100-1300）
+	var base_vx: float = 410.0 + float(_pending_isfp_skill1_level - 1) * 60.0
+	var base_vy: float = -290.0 - float(_pending_isfp_skill1_level - 1) * 35.0
+
+	if _pending_isfp_skill1_dir == "back":
+		# 按住反向：近身脚下近抛（防贴脸突进）
+		base_vx = 160.0
+		base_vy = -340.0
+	elif _pending_isfp_skill1_dir == "forward":
+		# 按住正向：低弧度远抛（中远距离骚扰）
+		base_vx = 520.0 + float(_pending_isfp_skill1_level - 1) * 70.0
+		base_vy = -190.0
+	elif _pending_isfp_skill1_dir == "up":
+		base_vx = 280.0
+		base_vy = -420.0
+	elif _pending_isfp_skill1_dir == "down":
+		base_vx = 240.0
+		base_vy = -140.0
+
+	blob.velocity = Vector2(facing * base_vx, base_vy)
+	blob.damage = 9 + (_pending_isfp_skill1_level - 1) * 3
+	var p := get_parent()
+	if p:
+		p.add_child(blob)
+	elif is_inside_tree():
+		get_tree().root.add_child(blob)
+
+func trigger_paint_slip(duration: float, slip_direction: float) -> void:
+	paint_slip_timer = duration
+	paint_slip_dir = slip_direction
+	hit_flash_timer = 0.033 # 短暂 2 帧受击闪白与打滑微硬直
+	trigger_squash(1.22, 0.80)
+	AudioManager.play_sfx("tech_roll", -5.0, 1.25)
+	var vfx := BattleVFX.get_current(get_tree())
+	if vfx:
+		vfx.spawn_floating_text(global_position + Vector2(0.0, -88.0), "打滑 SLIP!", Color("#f59e0b"), 0.92)
+
+func _update_isfp_charge_particles(delta: float) -> void:
+	# 笔尖局部坐标（相对于角色 CharacterBody2D 原点）
+	var tip_local := Vector2(float(facing) * 52.0, -56.0)
+
+	# 随蓄力时间增加生成频率（蓄力越长，聚拢越密集明显）
+	var charge_progress: float = clampf(charge_elapsed / 0.95, 0.0, 1.0)
+	var spawn_interval: float = lerpf(0.045, 0.016, charge_progress)
+
+	_charge_particle_timer -= delta
+	if _charge_particle_timer <= 0.0:
+		_charge_particle_timer = spawn_interval
+		var cols: Array[Color] = [
+			Color("#f59e0b"), Color("#ec4899"), Color("#06b6d4"), Color("#84cc16")
+		]
+		# 不规则从周围聚拢（生成半径从 35px 到 55px，受时间加成）
+		var spawn_r: float = randf_range(32.0, 50.0 + 15.0 * charge_progress)
+		var ang: float = randf_range(0.0, TAU)
+		var start_p := tip_local + Vector2(cos(ang) * spawn_r * 1.15, sin(ang) * spawn_r * 0.85)
+
+		_charge_particles.append({
+			"pos": start_p,
+			"tip": tip_local,
+			"color": cols[randi() % cols.size()],
+			"life": 0.0,
+			"max_life": randf_range(0.24, 0.36) / (1.0 + 0.5 * charge_progress),
+			"size": randf_range(1.6, 2.8)
+		})
+
+	# 更新所有活动聚拢粒子的生命与轨迹
+	var alive_particles: Array[Dictionary] = []
+	for p in _charge_particles:
+		p["life"] += delta
+		var t: float = clampf(float(p["life"]) / float(p["max_life"]), 0.0, 1.0)
+		# 平滑缓动朝向笔尖聚拢（缓入加速聚拢感）
+		var ease_t: float = t * t
+		p["current_pos"] = (p["pos"] as Vector2).lerp(tip_local, ease_t)
+		if t < 1.0:
+			alive_particles.append(p)
+	_charge_particles = alive_particles
+
+func _draw_isfp_charge_particles() -> void:
+	var tip_local := Vector2(float(facing) * 52.0, -56.0)
+	var charge_progress: float = clampf(charge_elapsed / 0.95, 0.0, 1.0)
+
+	# 1. 绘制各个聚拢彩色微粒（低饱和柔和透明度，不完全遮挡角色动作）
+	for p in _charge_particles:
+		var t: float = clampf(float(p["life"]) / float(p["max_life"]), 0.0, 1.0)
+		var cpos: Vector2 = p.get("current_pos", p["pos"])
+		# 透明度适度降低（0.35 - 0.65），亮度适中柔和
+		var alpha: float = sin(t * PI) * 0.55
+		var col: Color = p["color"]
+		col.a = alpha
+		var sz: float = float(p["size"]) * (1.0 - t * 0.4)
+		draw_circle(cpos, sz, col)
+
+	# 2. 笔尖中心微弱彩色聚能光核：大小严格限制，绝不超过投掷物大小（最大半径 11px <= 投掷物半径 12-15px）
+	var core_rad: float = lerpf(3.0, 10.5, charge_progress)
+	var pulse: float = 1.0 + sin(_breath_time * 14.0) * 0.12
+	var final_rad: float = core_rad * pulse
+
+	var core_col := Color("#f59e0b")
+	if charge_level == 2:
+		core_col = Color("#ec4899")
+	elif charge_level >= 3:
+		core_col = Color("#06b6d4")
+
+	# 外层微弱柔和光晕（透明度 0.22）
+	core_col.a = 0.22 + 0.12 * charge_progress
+	draw_circle(tip_local, final_rad * 1.15, core_col)
+	# 核心轻微微光（透明度 0.45）
+	core_col.a = 0.45 + 0.15 * charge_progress
+	draw_circle(tip_local, final_rad * 0.65, core_col)

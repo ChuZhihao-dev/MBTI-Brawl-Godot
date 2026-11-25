@@ -59,6 +59,12 @@ func _ready() -> void:
 func _refresh_mode_btn() -> void:
 	if _mode_btn == null:
 		return
+	if GameManager.battle_mode == "practice":
+		_mode_btn.text = "模式：练习场"
+		_mode_btn.disabled = true
+		start_fight_btn.text = "进入练习场"
+		UIStyle.style_secondary_btn(_mode_btn, Color("#059669"))
+		return
 	if GameManager.battle_mode == "ai":
 		var diff_s := "困难" if GameManager.ai_difficulty == "hard" else "普通"
 		_mode_btn.text = "模式：AI（%s）" % diff_s

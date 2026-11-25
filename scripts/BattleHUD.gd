@@ -28,6 +28,9 @@ var _p1_trail_bar: ProgressBar
 var _p2_trail_bar: ProgressBar
 var _p1_combo_lbl: Label
 var _p2_combo_lbl: Label
+signal practice_cooldowns_toggled(enabled: bool)
+signal practice_combat_toggled(enabled: bool)
+
 var _p1_rounds_lbl: Label
 var _p2_rounds_lbl: Label
 var _timer_lbl: Label
@@ -337,6 +340,25 @@ func _build_hud_extensions() -> void:
 	)
 	btn_row.add_child(_bgm_btn)
 	center_box.add_child(btn_row)
+	if GameManager.battle_mode == "practice":
+		_p1_rounds_lbl.hide()
+		_p2_rounds_lbl.hide()
+		_timer_lbl.text = "练习场"
+		var practice_row := HBoxContainer.new()
+		practice_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		practice_row.add_theme_constant_override("separation", 8)
+		for setting in ["技能冷却", "AI 对练"]:
+			var checkbox := CheckBox.new()
+			checkbox.name = "PracticeCooldowns" if setting == "技能冷却" else "PracticeCombat"
+			checkbox.text = setting
+			checkbox.add_theme_font_size_override("font_size", 14)
+			UIStyle.style_secondary_btn(checkbox)
+			if setting == "技能冷却":
+				checkbox.toggled.connect(practice_cooldowns_toggled.emit)
+			else:
+				checkbox.toggled.connect(practice_combat_toggled.emit)
+			practice_row.add_child(checkbox)
+		center_box.add_child(practice_row)
 
 	back_btn.visible = false
 	top_bar.add_child(center_box)
@@ -661,10 +683,7 @@ func _set_pause_open(open: bool) -> void:
 	GameManager.is_pause_menu_open = open
 	if open:
 		_refresh_rebind_buttons()
-		get_tree().paused = true
-	else:
-		GameManager.hitstop_timer = 0.0
-		get_tree().paused = false
+	GameManager.sync_battle_pause()
 
 func _format_fighter_status(f: BaseFighter) -> String:
 	var parts: Array[String] = []

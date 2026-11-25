@@ -73,13 +73,114 @@ func trigger_screen_flash(color: Color, peak_alpha: float = 0.24, duration: floa
 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw.tween_property(_flash_rect, "color:a", 0.0, duration).set_ease(Tween.EASE_OUT)
 
-func spawn_hit_fx(pos: Vector2, color: Color, is_heavy: bool = false, is_block: bool = false) -> void:
+func spawn_hit_fx(pos: Vector2, color: Color, is_heavy: bool = false, is_block: bool = false, is_paint: bool = false) -> void:
+	if is_paint and not is_block:
+		spawn_paint_hit_sparks(pos, is_heavy)
+		return
+
 	var fx_color: Color = Color("#38bdf8") if is_block else (Color("#fde047") if is_heavy else color.lightened(0.28))
 	spawn_cross_star(pos, fx_color, 84.0 if is_heavy else 54.0, 0.22 if is_heavy else 0.15, is_heavy)
 	spawn_shockwave_ring(pos, fx_color, 10.0, 128.0 if is_heavy else 78.0, 0.26 if is_heavy else 0.18, 6.0 if is_heavy else 4.0)
 	spawn_hit_particles(pos, fx_color, 26 if is_heavy else 15, 480.0 if is_heavy else 310.0)
 	if is_heavy and not is_block:
 		trigger_screen_flash(fx_color.lightened(0.45), 0.22, 0.15)
+
+func spawn_paint_hit_sparks(pos: Vector2, is_heavy: bool = false) -> void:
+	# ISFP 专属多色彩高冲击颜料质感打击火花：琥珀金、品红、天青与青柠绿颜料液滴喷溅
+	var paint_colors: Array[Color] = [
+		Color("#f59e0b"), # 温暖琥珀金
+		Color("#ec4899"), # 鲜亮品红
+		Color("#06b6d4"), # 纯净天青
+		Color("#84cc16"), # 荧光青柠
+		Color("#fbbf24")  # 高光亮金
+	]
+
+	# 1. 多色彩液体颜料粒子四射爆发
+	var p := GPUParticles2D.new()
+	p.position = pos
+	p.one_shot = true
+	p.explosiveness = 0.96
+	p.amount = 32 if is_heavy else 20
+	p.lifetime = 0.42 if is_heavy else 0.32
+	p.emitting = true
+	p.material = _add_mat
+	p.texture = _dot_tex # 圆润柔光液滴质感
+
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	mat.emission_sphere_radius = 16.0 if is_heavy else 10.0
+	mat.direction = Vector3(0.0, -0.6, 0.0)
+	mat.spread = 160.0
+	mat.initial_velocity_min = 220.0 if is_heavy else 150.0
+	mat.initial_velocity_max = 520.0 if is_heavy else 360.0
+	mat.gravity = Vector3(0.0, 680.0, 0.0) # 真实的颜料下坠重力弧线
+	mat.damping_min = 160.0
+	mat.damping_max = 300.0
+	mat.scale_min = 0.45
+	mat.scale_max = 1.25 if is_heavy else 0.85
+
+	var grad := Gradient.new()
+	grad.add_point(0.0, Color(2.5, 2.4, 2.0, 1.0))
+	grad.add_point(0.2, Color("#fbbf24"))
+	grad.add_point(0.45, Color("#ec4899"))
+	grad.add_point(0.75, Color("#06b6d4"))
+	grad.add_point(1.0, Color(0.06, 0.71, 0.83, 0.0))
+	var grad_tex := GradientTexture1D.new()
+	grad_tex.gradient = grad
+	mat.color_ramp = grad_tex
+	p.process_material = mat
+	add_child(p)
+
+	# 2. 生成多色彩微型颜料飞溅小斑块（柔和扩散）
+	for i in range(paint_colors.size()):
+		var col: Color = paint_colors[i]
+		var sub_p := GPUParticles2D.new()
+		sub_p.position = pos + Vector2(randf_range(-12.0, 12.0), randf_range(-12.0, 12.0))
+		sub_p.one_shot = true
+		sub_p.explosiveness = 0.92
+		sub_p.amount = 6
+		sub_p.lifetime = 0.38
+		sub_p.emitting = true
+		sub_p.material = _add_mat
+		sub_p.texture = _dot_tex
+
+		var sub_mat := ParticleProcessMaterial.new()
+		sub_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_POINT
+		var ang: float = float(i) * (TAU / float(paint_colors.size())) + randf_range(-0.3, 0.3)
+		sub_mat.direction = Vector3(cos(ang), sin(ang), 0.0)
+		sub_mat.spread = 45.0
+		sub_mat.initial_velocity_min = 180.0
+		sub_mat.initial_velocity_max = 380.0 if is_heavy else 260.0
+		sub_mat.gravity = Vector3(0.0, 580.0, 0.0)
+		sub_mat.scale_min = 0.5
+		sub_mat.scale_max = 1.1 if is_heavy else 0.8
+		var sub_grad := Gradient.new()
+		sub_grad.add_point(0.0, Color(col.r * 2.2, col.g * 2.2, col.b * 2.2, 1.0))
+		sub_grad.add_point(0.65, col)
+		sub_grad.add_point(1.0, Color(col.r, col.g, col.b, 0.0))
+		var sub_grad_tex := GradientTexture1D.new()
+		sub_grad_tex.gradient = sub_grad
+		sub_mat.color_ramp = sub_grad_tex
+		sub_p.process_material = sub_mat
+		add_child(sub_p)
+
+		var sub_timer := get_tree().create_timer(0.5)
+		sub_timer.timeout.connect(func() -> void:
+			if is_instance_valid(sub_p):
+				sub_p.queue_free()
+		)
+
+	# 3. 伴随冲击波光环与高冲击闪光
+	spawn_shockwave_ring(pos, Color("#f59e0b"), 12.0, 130.0 if is_heavy else 80.0, 0.25 if is_heavy else 0.18, 5.0)
+	if is_heavy:
+		spawn_cross_star(pos, Color("#f43f5e"), 88.0, 0.22, true)
+		trigger_screen_flash(Color("#fed7aa"), 0.20, 0.15)
+
+	var timer := get_tree().create_timer(0.55)
+	timer.timeout.connect(func() -> void:
+		if is_instance_valid(p):
+			p.queue_free()
+	)
 
 func spawn_slash_arc(pos: Vector2, start_deg: float, end_deg: float, radius: float, color: Color, duration: float = 0.18, face_dir: int = 1) -> void:
 	if _slash_shader == null:
@@ -491,3 +592,82 @@ class _CrossStarNode extends Node2D:
 			var tip2 := Vector2(cos(ang2), sin(ang2)) * (r * 0.58)
 			var side2 := Vector2(-sin(ang2), cos(ang2)) * (thickness * 0.48)
 			draw_colored_polygon(PackedVector2Array([side2, tip2, -side2, Vector2.ZERO]), hdr_core)
+
+
+func spawn_paint_spark_drop(pos: Vector2, color: Color) -> void:
+	var sub_p := GPUParticles2D.new()
+	sub_p.position = pos
+	sub_p.one_shot = true
+	sub_p.explosiveness = 0.90
+	sub_p.amount = 4
+	sub_p.lifetime = 0.28
+	sub_p.emitting = true
+	sub_p.material = _add_mat
+	sub_p.texture = _dot_tex
+
+	var sub_mat := ParticleProcessMaterial.new()
+	sub_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_POINT
+	sub_mat.direction = Vector3(0.0, -1.0, 0.0)
+	sub_mat.spread = 75.0
+	sub_mat.initial_velocity_min = 40.0
+	sub_mat.initial_velocity_max = 120.0
+	sub_mat.gravity = Vector3(0.0, 480.0, 0.0)
+	sub_mat.scale_min = 0.35
+	sub_mat.scale_max = 0.65
+	var sub_grad := Gradient.new()
+	sub_grad.add_point(0.0, Color(color.r * 1.8, color.g * 1.8, color.b * 1.8, 1.0))
+	sub_grad.add_point(0.7, color)
+	sub_grad.add_point(1.0, Color(color.r, color.g, color.b, 0.0))
+	var sub_grad_tex := GradientTexture1D.new()
+	sub_grad_tex.gradient = sub_grad
+	sub_mat.color_ramp = sub_grad_tex
+	sub_p.process_material = sub_mat
+	add_child(sub_p)
+
+	var sub_timer := get_tree().create_timer(0.35)
+	sub_timer.timeout.connect(func() -> void:
+		if is_instance_valid(sub_p):
+			sub_p.queue_free()
+	)
+
+func spawn_brush_tip_splatter(pos: Vector2, facing_dir: int) -> void:
+	var paint_cols: Array[Color] = [
+		Color("#f59e0b"), Color("#ec4899"), Color("#06b6d4"), Color("#84cc16")
+	]
+	for i in range(paint_cols.size()):
+		var col: Color = paint_cols[i]
+		var p := GPUParticles2D.new()
+		p.position = pos + Vector2(randf_range(-4.0, 4.0), randf_range(-4.0, 4.0))
+		p.one_shot = true
+		p.explosiveness = 0.95
+		p.amount = 5
+		p.lifetime = 0.26
+		p.emitting = true
+		p.material = _add_mat
+		p.texture = _dot_tex
+
+		var mat := ParticleProcessMaterial.new()
+		mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_POINT
+		var ang: float = deg_to_rad(-25.0) if facing_dir > 0 else deg_to_rad(-155.0)
+		mat.direction = Vector3(cos(ang), sin(ang), 0.0)
+		mat.spread = 40.0
+		mat.initial_velocity_min = 120.0
+		mat.initial_velocity_max = 260.0
+		mat.gravity = Vector3(0.0, 600.0, 0.0)
+		mat.scale_min = 0.4
+		mat.scale_max = 0.85
+		var grad := Gradient.new()
+		grad.add_point(0.0, Color(col.r * 2.0, col.g * 2.0, col.b * 2.0, 1.0))
+		grad.add_point(0.7, col)
+		grad.add_point(1.0, Color(col.r, col.g, col.b, 0.0))
+		var grad_tex := GradientTexture1D.new()
+		grad_tex.gradient = grad
+		mat.color_ramp = grad_tex
+		p.process_material = mat
+		add_child(p)
+
+		var timer := get_tree().create_timer(0.35)
+		timer.timeout.connect(func() -> void:
+			if is_instance_valid(p):
+				p.queue_free()
+		)

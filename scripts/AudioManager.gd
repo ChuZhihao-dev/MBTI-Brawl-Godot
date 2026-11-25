@@ -112,6 +112,7 @@ func _build_all_sfx() -> void:
 	_streams["round_ready"] = _gen_chime(0.22, 440.0, 554.37, 0.45)
 	_streams["round_fight"] = _gen_ultimate(0.38)
 	_streams["shield_break"] = _gen_shield_break(0.46)
+	_streams["glass_shatter"] = _gen_glass_shatter()
 	_streams["wall_bounce"] = _gen_hit(0.24, 240.0, 58.0, 0.85)
 	_streams["tech_roll"] = _gen_chime(0.16, 740.0, 1180.0, 0.45)
 	_streams["air_slam"] = _gen_whoosh(0.22, 620.0, 140.0, 0.62)
@@ -256,6 +257,28 @@ func _gen_ko_gong(duration: float) -> AudioStreamWAV:
 		var env: float = exp(-t * 2.8)
 		out[i] = tanh((gong + burst) * 1.5) * env * 0.82
 	return _pack_wav(out)
+
+func _gen_glass_shatter() -> AudioStreamWAV:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 419
+	var samples := PackedFloat32Array()
+	samples.resize(roundi(0.36 * SAMPLE_RATE))
+	var previous_noise := 0.0
+	for index in range(samples.size()):
+		var time := float(index) / SAMPLE_RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		var crack := (noise - previous_noise) * exp(-time * 135.0) * 0.53
+		previous_noise = noise
+		var fragments := 0.0
+		for shard in range(6):
+			var age := time - float(shard * shard) * 0.006
+			if age < 0.0:
+				break
+			var pitch := 2250.0 + shard * 460.0
+			var chime := sin(TAU * age * pitch) + sin(TAU * age * pitch * 1.39) * 0.42
+			fragments += (chime * 0.46 + noise * 0.35) * exp(-age * (52.0 + shard * 2.0)) / (1.0 + shard * 0.55)
+		samples[index] = tanh(crack + fragments) * (1.0 - smoothstep(0.27, 0.36, time))
+	return _pack_wav(samples)
 
 func _gen_shield_break(duration: float) -> AudioStreamWAV:
 	var count: int = int(duration * SAMPLE_RATE)

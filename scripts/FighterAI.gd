@@ -39,6 +39,20 @@ func _physics_process(delta: float) -> void:
 		"ult_just": false
 	}
 
+	if difficulty == "easy":
+		_think_timer = maxf(0.0, _think_timer - delta)
+		var gap := opponent.global_position - fighter.global_position
+		inp["horiz"] = signf(gap.x) * 0.55 if absf(gap.x) > 86.0 else 0.0
+		if _think_timer <= 0.0 and fighter.hitstun_timer <= 0.0:
+			_think_timer = randf_range(0.65, 1.0)
+			if absf(gap.x) < 110.0 and absf(gap.y) < 70.0 and fighter.basic_cd <= 0.0:
+				inp["light_just"] = true
+			elif gap.y < -85.0 and fighter.is_on_floor():
+				inp["up_just"] = true
+				inp["up_held"] = true
+		fighter.ai_input = inp
+		return
+
 	# 正在蓄力技能时持续按住直到预定蓄力时长结束
 	if _charge_slot != "":
 		_charge_hold_left -= delta

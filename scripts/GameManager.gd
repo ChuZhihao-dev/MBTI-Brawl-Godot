@@ -4,10 +4,11 @@ const SETTINGS_PATH: String = "user://settings.cfg"
 
 var selected_p1: String = "enfj"
 var selected_p2: String = "infj"
-var battle_mode: String = "pvp" # "pvp" 或 "ai"
+var battle_mode: String = "pvp" # "pvp"、"ai" 或 "practice"
 var ai_difficulty: String = "normal" # "normal" 或 "hard"
 var hitstop_timer: float = 0.0
 var is_pause_menu_open: bool = false
+var _cinematic_owner: Node
 
 # BO3 三局两胜制与局末 MVP 统计
 var rounds_to_win: int = 2
@@ -152,9 +153,21 @@ func get_sprite_config(id: String) -> Dictionary:
 		return SPRITE_SHEETS[id] as Dictionary
 	return {}
 
+func begin_cinematic(owner: Node) -> void:
+	_cinematic_owner = owner
+	sync_battle_pause()
+
+func end_cinematic(owner: Node) -> void:
+	if _cinematic_owner == owner:
+		_cinematic_owner = null
+		sync_battle_pause()
+
+func sync_battle_pause() -> void:
+	get_tree().paused = is_pause_menu_open or hitstop_timer > 0.0 or is_instance_valid(_cinematic_owner)
+
 func trigger_hitstop(seconds: float) -> void:
 	hitstop_timer = maxf(hitstop_timer, seconds)
-	get_tree().paused = true
+	sync_battle_pause()
 
 func trigger_shake(intensity: float, duration: float = 0.16, dir: Vector2 = Vector2.ZERO) -> void:
 	camera_shake_requested.emit(intensity, duration, dir)
@@ -187,8 +200,7 @@ func _process(delta: float) -> void:
 		hitstop_timer -= delta
 		if hitstop_timer <= 0.0:
 			hitstop_timer = 0.0
-			if not is_pause_menu_open:
-				get_tree().paused = false
+			sync_battle_pause()
 
 func load_keybindings() -> void:
 	var cfg := ConfigFile.new()

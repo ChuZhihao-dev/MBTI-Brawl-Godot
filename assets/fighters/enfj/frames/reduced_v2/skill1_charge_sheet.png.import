@@ -2,16 +2,12 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://566u5a6lh74p"
-path="res://.godot/imported/skill1_charge_sheet.png-a7cceb4abe051acd0572f851115f0fb0.ctex"
-metadata={
-"vram_texture": false
-}
+uid="uid://bmk7rc0pnrmrd"
+valid=false
 
 [deps]
 
 source_file="res://assets/fighters/enfj/frames/reduced_v2/skill1_charge_sheet.png"
-dest_files=["res://.godot/imported/skill1_charge_sheet.png-a7cceb4abe051acd0572f851115f0fb0.ctex"]
 
 [params]
 

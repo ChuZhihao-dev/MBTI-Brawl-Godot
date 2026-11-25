@@ -17,6 +17,7 @@ func _ready() -> void:
 	versus_btn.text = "双人对战 (1P vs 2P)"
 	UIStyle.style_primary_btn(start_btn, true)
 	UIStyle.style_secondary_btn(versus_btn)
+	UIStyle.style_secondary_btn($MenuDock/MenuBar/PracticeBtn)
 	UIStyle.style_secondary_btn(quit_btn)
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -40,6 +41,9 @@ func _on_start_pressed() -> void:
 
 func _on_versus_pressed() -> void:
 	_enter_select("pvp")
+
+func _on_practice_pressed() -> void:
+	_enter_select("practice")
 
 func _on_quit_pressed() -> void:
 	if _transitioning:
