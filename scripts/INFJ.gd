@@ -170,11 +170,12 @@ func _perform_light_attack() -> void:
 	var spd: float = _get_attack_speed_mult()
 
 	if stance == Stance.SURFACE:
-		# 【表 · 共鸣态】灵动 3 段近中程弧光连击（带微位移，第 3 段推开拉扯）
+		# 【表 · 共鸣态】灵动 3 段近中程弧光连击（1~2 段斜挥斩、第 3 段前踏共鸣点刺）
 		basic_cd = (0.24 if _combo_count < 3 else 0.34) / spd
-		action_anim_state = "light"
-		action_anim_timer = (0.22 if _combo_count < 3 else 0.30) / spd
-		_play_anim("light", true)
+		var st_name: String = "light_surface_1" if _combo_count < 3 else "light_surface_3"
+		action_anim_state = st_name
+		action_anim_timer = (0.24 if _combo_count < 3 else 0.30) / spd
+		_play_anim(st_name, true)
 		trigger_squash(1.12, 0.90)
 		AudioManager.play_sfx("swing_light", -5.0, 1.04 + float(_combo_count) * 0.07)
 		if is_on_floor():
@@ -190,9 +191,10 @@ func _perform_light_attack() -> void:
 	else:
 		# 【里 · 洞察态】高速 3 段空间切裂斩，第 3 段在对手身后补出延迟「空间裂隙」！
 		basic_cd = (0.21 if _combo_count < 3 else 0.36) / spd
-		action_anim_state = "light"
-		action_anim_timer = (0.20 if _combo_count < 3 else 0.30) / spd
-		_play_anim("light", true)
+		var sh_name: String = "light_shadow_1" if _combo_count < 3 else "light_shadow_3"
+		action_anim_state = sh_name
+		action_anim_timer = (0.22 if _combo_count < 3 else 0.30) / spd
+		_play_anim(sh_name, true)
 		trigger_squash(1.16, 0.88)
 		AudioManager.play_sfx("swing_light", -4.5, 1.22 + float(_combo_count) * 0.08)
 		spawn_slash_arc(-105.0, 50.0, 108.0 + float(_combo_count) * 8.0, SHADOW_COLOR.lightened(0.22), 0.15)
@@ -215,6 +217,8 @@ func _perform_heavy_attack() -> void:
 
 	if stance == Stance.SURFACE:
 		# 【表 · 共鸣态重击】棱镜折射：近身震飞 + 原路反弹一切敌方飞行道具！
+		action_anim_state = "heavy_surface"
+		_play_anim("heavy_surface", true)
 		AudioManager.play_sfx("swing_heavy", -3.0, 1.18)
 		var shield_pos: Vector2 = global_position + Vector2(facing * 64.0, -52.0)
 		if vfx:
@@ -232,6 +236,8 @@ func _perform_heavy_attack() -> void:
 			_spawn_gravity_prism()
 	else:
 		# 【里 · 洞察态重击】维度坍缩：前方投射几何棱锥，短延迟向心拉扯并挑飞！
+		action_anim_state = "heavy_shadow"
+		_play_anim("heavy_shadow", true)
 		AudioManager.play_sfx("skill_wave", -3.0, 0.92)
 		_spawn_gravity_prism()
 		if dual_persona_timer > 0.0:

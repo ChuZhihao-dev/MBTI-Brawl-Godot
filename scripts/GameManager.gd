@@ -126,8 +126,15 @@ const SPRITE_SHEETS: Dictionary = {
 		"jump": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 2, "frames": 4, "fps": 9.0, "loop": false},
 		"landing": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 6, "frames": 2, "fps": 14.0, "loop": false},
 		"dash": {"path": "res://assets/fighters/infj/frames/v3/dash_sheet.png", "cols": 4, "rows": 4, "start": 0, "frames": 12, "fps": 33.0, "loop": false},
-		"light": {"path": "res://assets/fighters/infj/frames/attack_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 15.0, "loop": false},
-		"heavy": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
+		"guard": {"path": "res://assets/fighters/infj/frames/v3/guard_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 8, "fps": 7.0, "loop": true, "loop_start": 2},
+		"light": {"path": "res://assets/fighters/infj/frames/v3/light_surface_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 4, "fps": 17.0, "loop": false},
+		"light_surface_1": {"path": "res://assets/fighters/infj/frames/v3/light_surface_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 4, "fps": 17.0, "loop": false},
+		"light_surface_3": {"path": "res://assets/fighters/infj/frames/v3/light_surface_sheet.png", "cols": 4, "rows": 2, "start": 4, "frames": 4, "fps": 15.0, "loop": false},
+		"light_shadow_1": {"path": "res://assets/fighters/infj/frames/v3/light_shadow_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 4, "fps": 18.0, "loop": false},
+		"light_shadow_3": {"path": "res://assets/fighters/infj/frames/v3/light_shadow_sheet.png", "cols": 4, "rows": 2, "start": 4, "frames": 4, "fps": 16.0, "loop": false},
+		"heavy": {"path": "res://assets/fighters/infj/frames/v3/heavy_dual_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
+		"heavy_surface": {"path": "res://assets/fighters/infj/frames/v3/heavy_dual_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
+		"heavy_shadow": {"path": "res://assets/fighters/infj/frames/v3/heavy_dual_sheet.png", "cols": 4, "rows": 2, "start": 4, "frames": 4, "fps": 12.0, "loop": false},
 		"skill": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
 		"hit": {"path": "res://assets/fighters/infj/frames/hit_sheet.png", "cols": 2, "rows": 1, "start": 0, "frames": 2, "fps": 10.0, "loop": false}
 	}
