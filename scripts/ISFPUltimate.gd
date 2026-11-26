@@ -3,9 +3,10 @@ extends Node2D
 const ORIGINAL_SHEET = preload("res://assets/fighters/isfp/newframes/ultimate_16f_sheet.png")
 const AIR_COMBO_SHEET = preload("res://assets/fighters/isfp/newframes/ultimate_16f_sheet_v2.png")
 const UPDATED_STRIKE_SHEET = preload("res://assets/fighters/isfp/newframes/ultimate_16f_sheet_v3.png")
+const FOLLOW_UP_SHEET = preload("res://assets/fighters/isfp/newframes/ultimate_16f_sheet_v4.png")
 const CAGE_ART = preload("res://assets/fighters/isfp/newframes/ultimate_paint_rope_cage_concept.png")
 const CUTOUT = preload("res://shaders/cutout_white.gdshader")
-const FRAME_TICKS: Array[int] = [2, 3, 3, 3, 3, 4, 18, 5, 3, 3, 3, 3, 3, 9, 4, 14, 4]
+const FRAME_TICKS: Array[int] = [2, 3, 3, 3, 3, 4, 13, 4, 6, 5, 4, 3, 3, 9, 4, 14, 4]
 const STEP: float = 1.0 / 60.0
 const DURATION: float = 3.0
 const BURST_FRAME := 16
@@ -74,6 +75,8 @@ func _ready() -> void:
 		var source_index := index - 1 if index >= BURST_FRAME - 1 else index
 		if index in [5, 6, 8, 10, 12]:
 			sheet = UPDATED_STRIKE_SHEET
+		elif index in [9, 11]:
+			sheet = FOLLOW_UP_SHEET
 		atlas.atlas = sheet
 		var left := roundi(float(source_index % 8) * sheet.get_width() / 8.0)
 		var right := roundi(float(source_index % 8 + 1) * sheet.get_width() / 8.0)
@@ -219,6 +222,7 @@ func _position_pose() -> void:
 
 func _enter_frame() -> void:
 	overlay.begin_frame(frame)
+	queue_redraw()
 	match frame:
 		2:
 			if is_instance_valid(camera) and camera.has_method("set_ultimate_zoom"):
@@ -243,14 +247,15 @@ func _enter_frame() -> void:
 			_clear_launch_ghost()
 			pose.show()
 		9:
-			_strike(8, 0.0, 3, 6.0, 4)
+			_strike(6, 0.0, 2, 6.0, 4)
 		10:
-			if is_instance_valid(target):
-				target.velocity.y = -40.0
+			_strike(5, -40.0, 2, 5.0, 3)
 		11:
-			_strike(8, 0.0, 3, 7.0, 4)
+			_strike(4, 0.0, 2, 7.0, 4)
+		12:
+			_strike(4, 0.0, 1, 8.0, 3)
 		13:
-			_strike(12, 0.0, 0, 14.0, 8)
+			_strike(9, 0.0, 4, 14.0, 8)
 		14:
 			var landing_time := (FRAME_TICKS[13] + FRAME_TICKS[14]) * STEP
 			var drop := maxf(0.0, caster_floor - fighter.global_position.y)
