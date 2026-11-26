@@ -155,9 +155,9 @@ func _physics_process(delta: float) -> void:
 		elif air_dy > 110.0 and randf() < 0.5:
 			inp["guard_held"] = true
 
-	# 4. 平台跳跃与追击移动
-	var is_ranged: bool = fighter.fighter_id == "infj"
-	var ideal_dist: float = 240.0 if (is_ranged and not chasing_item) else 78.0
+	# 4. 平台跳跃与追击移动（重做后的 INFJ 为近中程双姿态战术型，主动贴身与中距离变招拉扯）
+	var is_ranged: bool = false
+	var ideal_dist: float = 108.0 if (fighter.fighter_id == "infj" and not chasing_item) else 78.0
 	if dist_x > ideal_dist + 28.0:
 		_desired_horiz = dir_to_target
 	elif is_ranged and not chasing_item and dist_x < 120.0:

@@ -19,6 +19,7 @@ var _sprite: Sprite2D
 
 func _ready() -> void:
 	z_index = 25
+	add_to_group("projectiles")
 	_sprite = Sprite2D.new()
 	var tex_path := "res://assets/fighters/enfj/frames/reduced_v2/ultimate_projectile.png" if is_ultimate else ("res://assets/fighters/enfj/frames/reduced_v2/sword_wave_lv%d.png" % clampi(charge_level, 1, 3))
 	if not ResourceLoader.exists(tex_path):
@@ -86,3 +87,17 @@ func _physics_process(delta: float) -> void:
 			if not is_ultimate and charge_level < 3:
 				queue_free()
 				return
+
+func reflect(new_owner: BaseFighter) -> void:
+	if is_ultimate:
+		return
+	owner_fighter = new_owner
+	velocity = -velocity * 1.25
+	knockback.x = -knockback.x
+	damage = int(round(float(damage) * 1.2))
+	_elapsed = 0.0
+	_hit_ids.clear()
+	tint_color = Color("#fde047")
+	if _sprite:
+		_sprite.flip_h = velocity.x < 0.0
+		_sprite.modulate = Color(1.9, 1.85, 0.95, 1.0)

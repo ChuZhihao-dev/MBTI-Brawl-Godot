@@ -120,9 +120,11 @@ const SPRITE_SHEETS: Dictionary = {
 		"hit": {"path": "res://assets/fighters/isfp/frames/hit_sheet.png", "cols": 2, "rows": 1, "start": 0, "frames": 2, "fps": 10.0, "loop": false}
 	},
 	"infj": {
-		"idle": {"path": "res://assets/fighters/infj/frames/v2/idle_sheet.png", "cols": 8, "rows": 1, "start": 0, "frames": 8, "fps": 6.0, "loop": true},
-		"walk": {"path": "res://assets/fighters/infj/frames/walk_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 11.0, "loop": true},
-		"jump": {"path": "res://assets/fighters/infj/frames/jump_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 9.0, "loop": false},
+		"idle": {"path": "res://assets/fighters/infj/frames/v3/idle_body_sheet.png", "cols": 4, "rows": 4, "start": 0, "frames": 16, "fps": 10.0, "loop": true},
+		"walk": {"path": "res://assets/fighters/infj/frames/v3/walk_sheet.png", "cols": 4, "rows": 4, "start": 0, "frames": 16, "fps": 16.0, "loop": true},
+		"jump_startup": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 2, "fps": 16.0, "loop": false},
+		"jump": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 2, "frames": 4, "fps": 9.0, "loop": false},
+		"landing": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 6, "frames": 2, "fps": 14.0, "loop": false},
 		"light": {"path": "res://assets/fighters/infj/frames/attack_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 15.0, "loop": false},
 		"heavy": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
 		"skill": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},

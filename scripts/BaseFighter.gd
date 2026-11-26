@@ -353,9 +353,15 @@ func _advance_anim(delta: float) -> void:
 		return
 	var cfg: Dictionary = _sheet_configs[_current_anim] as Dictionary
 	_anim_time += delta
-	var total: int = maxi(1, int(cfg["frames"]))
 	var fps: float = float(cfg["fps"])
 	var raw_idx: int = int(floor(_anim_time * fps))
+	if cfg.has("sequence"):
+		var seq: Array = cfg["sequence"] as Array
+		if not seq.is_empty():
+			var seq_idx: int = (raw_idx % seq.size()) if bool(cfg.get("loop", true)) else mini(seq.size() - 1, raw_idx)
+			sprite.frame = int(seq[seq_idx])
+			return
+	var total: int = maxi(1, int(cfg["frames"]))
 	var idx: int = 0
 	if bool(cfg.get("loop", true)):
 		var loop_start: int = clampi(int(cfg.get("loop_start", 0)), 0, total - 1)

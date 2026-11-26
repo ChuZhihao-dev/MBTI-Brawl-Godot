@@ -1,36 +1,77 @@
 extends BaseFighter
 class_name INFJFighter
 
-const LIGHT_QUOTES: Array[String] = ["礼貌微笑!", "我都懂…", "洞察连击!"]
+# 方案 A：「表里双姿态 · 变色龙切换」（跳出刻板印象的多变战术大师）
+enum Stance { SURFACE, SHADOW }
 
-var empathy_shield_timer: float = 0.0
-var _shield_pulse: float = 0.0
+const SURFACE_COLOR: Color = Color("#10b981") # 表 · 共鸣态（暖绿金）
+const SHADOW_COLOR: Color = Color("#8b5cf6")  # 里 · 洞察态（深翠幽紫）
+
+var stance: Stance = Stance.SURFACE
+var dual_persona_timer: float = 0.0
 var _combo_count: int = 0
 var _combo_reset_timer: float = 0.0
-var _heavy_toggle: int = 0
+var _emblem_phase: float = 0.0
 
 func _ready() -> void:
 	fighter_id = "infj"
 	fighter_name = "INFJ"
-	theme_color = Color("#10b981")
+	theme_color = SURFACE_COLOR
 	super._ready()
 
+func _get_stance_color() -> Color:
+	return SURFACE_COLOR if stance == Stance.SURFACE else SHADOW_COLOR
+
+func _get_effective_move_speed() -> float:
+	var mult: float = 1.06 if stance == Stance.SURFACE else 1.0
+	if dual_persona_timer > 0.0:
+		mult += 0.10
+	return move_speed * mult
+
+func _get_attack_speed_mult() -> float:
+	var mult: float = 1.12 if stance == Stance.SHADOW else 1.0
+	if dual_persona_timer > 0.0:
+		mult += 0.12
+	return mult
+
 func get_active_buff_status() -> String:
-	if empathy_shield_timer > 0.0:
-		return "共情护盾 %.1fs" % empathy_shield_timer
-	return ""
+	var parts: Array[String] = []
+	parts.append("【表·共鸣】" if stance == Stance.SURFACE else "【里·洞察】")
+	if dual_persona_timer > 0.0:
+		parts.append("表里双生 %.1fs" % dual_persona_timer)
+	var base_s: String = super.get_active_buff_status()
+	if base_s != "":
+		parts.append(base_s)
+	return " · ".join(parts)
+
+func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void:
+	stance = Stance.SURFACE
+	theme_color = SURFACE_COLOR
+	dual_persona_timer = 0.0
+	_combo_count = 0
+	_combo_reset_timer = 0.0
+	super.reset_for_new_round(spawn_pos, keep_ep_ratio)
 
 func _physics_process(delta: float) -> void:
-	if empathy_shield_timer > 0.0:
-		empathy_shield_timer = maxf(0.0, empathy_shield_timer - delta)
-		_shield_pulse += delta * 6.0
-		if int(floor(_shield_pulse)) != int(floor(_shield_pulse - delta * 6.0)):
+	_emblem_phase += delta * 4.2
+	if dual_persona_timer > 0.0:
+		dual_persona_timer = maxf(0.0, dual_persona_timer - delta)
+		if int(floor(_emblem_phase)) != int(floor(_emblem_phase - delta * 4.2)):
 			var vfx := BattleVFX.get_current(get_tree())
 			if vfx:
-				vfx.spawn_ember_burst(global_position + Vector2(randf_range(-26.0, 26.0), -44.0), Color("#34d399"), 2)
+				var c: Color = SURFACE_COLOR if (int(floor(_emblem_phase)) % 2 == 0) else SHADOW_COLOR
+				vfx.spawn_ember_burst(global_position + Vector2(randf_range(-24.0, 24.0), -38.0), c, 2)
+
 	if sprite and sprite.material is ShaderMaterial:
-		(sprite.material as ShaderMaterial).set_shader_parameter("aura_glow", 1.0 if empathy_shield_timer > 0.0 else 0.0)
-		(sprite.material as ShaderMaterial).set_shader_parameter("aura_color", Color("#34d399"))
+		var mat := sprite.material as ShaderMaterial
+		if dual_persona_timer > 0.0:
+			mat.set_shader_parameter("aura_glow", 1.0)
+			mat.set_shader_parameter("aura_color", Color("#fde047"))
+		elif stance == Stance.SHADOW:
+			mat.set_shader_parameter("aura_glow", 0.55)
+			mat.set_shader_parameter("aura_color", SHADOW_COLOR)
+		else:
+			mat.set_shader_parameter("aura_glow", 0.0)
 
 	if _combo_reset_timer > 0.0:
 		_combo_reset_timer = maxf(0.0, _combo_reset_timer - delta)
@@ -39,157 +80,259 @@ func _physics_process(delta: float) -> void:
 
 	super._physics_process(delta)
 
+	# 60fps 极柔和呼吸微动（与 2.14s 慢速棱镜循环叠合，消除帧切生硬感）
+	if sprite and sprite.visible and _current_anim == "idle" and not is_ko:
+		var b_sy: float = 1.0 + sin(_breath_time * 2.9) * 0.018
+		var b_sx: float = 1.0 - sin(_breath_time * 2.9) * 0.010
+		sprite.scale = Vector2(sprite.scale.x * b_sx, sprite.scale.y * b_sy)
+		sprite.position.y = -target_sprite_height * 0.5 * b_sy + 4.0
+
 func _perform_light_attack() -> void:
-	# 轻击 3 段递进：1/2 段单发翡翠灵球，第 3 段高威双连灵球
 	_combo_count = (_combo_count % 3) + 1
 	_combo_reset_timer = 0.95
-	basic_cd = 0.30 if _combo_count < 3 else 0.42
-	action_anim_state = "light"
-	action_anim_timer = 0.28
-	_play_anim("light", true)
-	trigger_squash(1.12, 0.90)
-	AudioManager.play_sfx("swing_light", -5.0, 1.05 + _combo_count * 0.06)
+	var spd: float = _get_attack_speed_mult()
 
-	var quote: String = LIGHT_QUOTES[_combo_count - 1]
-	if _combo_count < 3:
-		_spawn_orb(
-			Vector2(facing * 36.0, -56.0),
-			Vector2(facing * 590.0, 0.0),
-			7 + _combo_count,
-			Vector2(facing * 190.0, -100.0),
-			14.0,
-			0.82,
-			Color("#34d399"),
-			quote
-		)
+	if stance == Stance.SURFACE:
+		# 【表 · 共鸣态】灵动 3 段近中程弧光连击（带微位移，第 3 段推开拉扯）
+		basic_cd = (0.24 if _combo_count < 3 else 0.34) / spd
+		action_anim_state = "light"
+		action_anim_timer = (0.22 if _combo_count < 3 else 0.30) / spd
+		_play_anim("light", true)
+		trigger_squash(1.12, 0.90)
+		AudioManager.play_sfx("swing_light", -5.0, 1.04 + float(_combo_count) * 0.07)
+		if is_on_floor():
+			velocity.x = facing * (135.0 if _combo_count < 3 else 180.0)
+		var arc_col: Color = Color("#fde047") if _combo_count == 3 else SURFACE_COLOR.lightened(0.25)
+		spawn_slash_arc(-75.0 if _combo_count != 2 else 65.0, 55.0 if _combo_count != 2 else -70.0, 96.0 + float(_combo_count) * 10.0, arc_col, 0.16)
+		var kb: Vector2 = Vector2(facing * (190.0 if _combo_count < 3 else 330.0), -110.0 if _combo_count < 3 else -180.0)
+		var hit: bool = _perform_melee(7 + _combo_count, kb, _combo_count == 3, 114.0 + float(_combo_count) * 8.0)
+		if hit and _combo_count < 3:
+			can_hit_cancel = true
+		if dual_persona_timer > 0.0 and _combo_count == 3:
+			_spawn_behind_rift(6)
 	else:
-		# 第 3 段：上下交错双连灵球
-		_spawn_orb(Vector2(facing * 38.0, -68.0), Vector2(facing * 640.0, -28.0), 7, Vector2(facing * 240.0, -150.0), 16.0, 0.85, Color("#6ee7b7"), quote)
-		_spawn_orb(Vector2(facing * 38.0, -42.0), Vector2(facing * 640.0, 28.0), 7, Vector2(facing * 240.0, -150.0), 16.0, 0.85, Color("#fde047"), "")
+		# 【里 · 洞察态】高速 3 段空间切裂斩，第 3 段在对手身后补出延迟「空间裂隙」！
+		basic_cd = (0.21 if _combo_count < 3 else 0.36) / spd
+		action_anim_state = "light"
+		action_anim_timer = (0.20 if _combo_count < 3 else 0.30) / spd
+		_play_anim("light", true)
+		trigger_squash(1.16, 0.88)
+		AudioManager.play_sfx("swing_light", -4.5, 1.22 + float(_combo_count) * 0.08)
+		spawn_slash_arc(-105.0, 50.0, 108.0 + float(_combo_count) * 8.0, SHADOW_COLOR.lightened(0.22), 0.15)
+		var kb2: Vector2 = Vector2(facing * (170.0 if _combo_count < 3 else 250.0), -130.0 if _combo_count < 3 else -220.0)
+		var hit2: bool = _perform_melee(8 + _combo_count, kb2, _combo_count == 3, 122.0)
+		if hit2 and _combo_count < 3:
+			can_hit_cancel = true
+		if _combo_count == 3:
+			_spawn_behind_rift(9)
 
 func _perform_heavy_attack() -> void:
-	# 重击 2 变体交替：1. 中近程灵能震爆法阵（防贴脸）；2. 高速穿透洞察大光球
-	_heavy_toggle = (_heavy_toggle + 1) % 2
 	_combo_count = 0
-	basic_cd = 0.52
+	var spd: float = _get_attack_speed_mult()
+	basic_cd = 0.48 / spd
 	action_anim_state = "heavy"
-	action_anim_timer = 0.38
+	action_anim_timer = 0.36 / spd
 	_play_anim("heavy", true)
-	trigger_squash(1.18, 0.86)
-	AudioManager.play_sfx("swing_heavy", -3.0, 1.15)
+	trigger_squash(1.20, 0.84)
 	var vfx := BattleVFX.get_current(get_tree())
 
-	if _heavy_toggle == 1:
-		var blast_pos: Vector2 = global_position + Vector2(facing * 84.0, -48.0)
+	if stance == Stance.SURFACE:
+		# 【表 · 共鸣态重击】棱镜折射：近身震飞 + 原路反弹一切敌方飞行道具！
+		AudioManager.play_sfx("swing_heavy", -3.0, 1.18)
+		var shield_pos: Vector2 = global_position + Vector2(facing * 64.0, -52.0)
 		if vfx:
-			vfx.spawn_shockwave_ring(blast_pos, Color("#34d399"), 12.0, 118.0, 0.28, 6.0)
-			vfx.spawn_hit_particles(blast_pos, Color("#6ee7b7"), 16, 300.0)
-		var hit: bool = _perform_melee(13, Vector2(facing * 350.0, -220.0), true, 148.0)
-		if hit and vfx:
-			vfx.spawn_floating_text(blast_pos + Vector2(0.0, -54.0), "灵魂震慑!", Color("#fde047"), 1.05)
+			vfx.spawn_shockwave_ring(shield_pos, Color("#fde047"), 14.0, 112.0, 0.24, 6.0)
+			vfx.spawn_shockwave_ring(shield_pos, SURFACE_COLOR, 10.0, 88.0, 0.20, 4.0)
+		var reflected_any: bool = _reflect_nearby_projectiles(shield_pos, 145.0)
+		if reflected_any:
+			ep = minf(100.0, ep + 14.0)
+			AudioManager.play_sfx("parry", -1.5, 1.12)
+			GameManager.trigger_hitstop(0.08)
+			if vfx:
+				vfx.spawn_floating_text(global_position + Vector2(0.0, -116.0), "棱镜折射! +14 EP", Color("#fde047"), 1.16)
+		_perform_melee(12, Vector2(facing * 360.0, -220.0), true, 134.0)
+		if dual_persona_timer > 0.0:
+			_spawn_gravity_prism()
 	else:
-		_spawn_orb(
-			Vector2(facing * 42.0, -54.0),
-			Vector2(facing * 720.0, 0.0),
-			14,
-			Vector2(facing * 380.0, -210.0),
-			22.0,
-			0.95,
-			Color("#2dd4bf"),
-			"看穿你了!"
-		)
+		# 【里 · 洞察态重击】维度坍缩：前方投射几何棱锥，短延迟向心拉扯并挑飞！
+		AudioManager.play_sfx("skill_wave", -3.0, 0.92)
+		_spawn_gravity_prism()
+		if dual_persona_timer > 0.0:
+			_reflect_nearby_projectiles(global_position + Vector2(facing * 56.0, -52.0), 120.0)
+
+func _reflect_nearby_projectiles(center: Vector2, rad: float) -> bool:
+	var reflected: bool = false
+	for proj in get_tree().get_nodes_in_group("projectiles"):
+		if not is_instance_valid(proj) or not (proj is Node2D):
+			continue
+		if proj.get("owner_fighter") == self:
+			continue
+		if (proj as Node2D).global_position.distance_to(center) <= rad and proj.has_method("reflect"):
+			proj.reflect(self)
+			reflected = true
+	return reflected
+
+func _spawn_behind_rift(dmg: int) -> void:
+	var target_pos: Vector2 = global_position + Vector2(facing * 140.0, -52.0)
+	var slash_dir: int = -facing
+	for node in get_tree().get_nodes_in_group("fighters"):
+		if node != self and node is BaseFighter and not (node as BaseFighter).is_ko:
+			var enemy := node as BaseFighter
+			var behind_sign: float = signf(enemy.global_position.x - global_position.x)
+			if behind_sign == 0.0:
+				behind_sign = float(facing)
+			target_pos = enemy.global_position + Vector2(behind_sign * 52.0, -52.0)
+			slash_dir = -int(behind_sign)
+			break
+	var rift := INFJPrismConstruct.new()
+	rift.kind = INFJPrismConstruct.Kind.RIFT_SLASH
+	rift.owner_fighter = self
+	rift.global_position = target_pos
+	rift.damage = dmg
+	rift.knockback = Vector2(float(slash_dir) * 260.0, -250.0)
+	rift.facing_dir = slash_dir
+	rift.tint_color = SURFACE_COLOR
+	rift.secondary_color = SHADOW_COLOR
+	get_parent().add_child(rift)
+
+func _spawn_gravity_prism() -> void:
+	var prism := INFJPrismConstruct.new()
+	prism.kind = INFJPrismConstruct.Kind.GRAVITY_PRISM
+	prism.owner_fighter = self
+	prism.global_position = global_position + Vector2(facing * 56.0, -54.0)
+	prism.velocity = Vector2(facing * 430.0, 0.0)
+	prism.damage = 13
+	prism.facing_dir = facing
+	prism.tint_color = SURFACE_COLOR
+	prism.secondary_color = SHADOW_COLOR
+	get_parent().add_child(prism)
 
 func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 	var vfx := BattleVFX.get_current(get_tree())
 	if slot == "skill1":
-		# 洞察预言（U/4）：三档蓄力 + 四向派生
-		skill1_cd = 2.9
+		# 技能 1（U/4）：千面幻象（四向彻底不同机制）
+		skill1_cd = 2.5
 		action_anim_state = "skill"
-		action_anim_timer = 0.44
+		action_anim_timer = 0.36
 		_play_anim("skill", true)
-		trigger_squash(1.14, 0.90)
-		AudioManager.play_sfx("skill_wave", -3.0, 1.1 + level * 0.06)
+		trigger_squash(1.14, 0.88)
 
-		if dir == "down":
-			# 向下派生：放置延时引爆的「小本本印记」陷阱法阵
-			var mine_pos := Vector2(facing * (95.0 + level * 22.0), -26.0)
-			_spawn_orb(mine_pos, Vector2.ZERO, 9 + level * 4, Vector2(facing * 320.0, -270.0), 18.0 + level * 4.0, 2.2, Color("#fde047") if level >= 3 else Color("#10b981"), "记小本本了!", true, 96.0 + level * 26.0)
+		if dir == "up":
+			# 向上派生：虚实换位（瞬间上移 + 原地留下反击替身幻象！）
+			var old_pos := global_position
+			var decoy := INFJPrismConstruct.new()
+			decoy.kind = INFJPrismConstruct.Kind.DECOY_ILLUSION
+			decoy.owner_fighter = self
+			decoy.global_position = old_pos
+			decoy.damage = 9 + level * 2
+			decoy.facing_dir = facing
+			decoy.tint_color = _get_stance_color()
+			decoy.max_lifetime = 2.2 + float(level) * 0.4
+			get_parent().add_child(decoy)
+
+			global_position.y = maxf(190.0, global_position.y - 135.0)
+			velocity = Vector2(facing * 120.0, -180.0)
+			invincible_timer = maxf(invincible_timer, 0.18)
+			AudioManager.play_sfx("dash", -3.0, 1.22)
 			if vfx:
-				vfx.spawn_floating_text(global_position + Vector2(0.0, -112.0), "小本本印记!", Color("#fde047"), 1.04)
+				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), _get_stance_color(), 10.0, 72.0, 0.22, 4.0)
+				vfx.spawn_floating_text(global_position + Vector2(0.0, -110.0), "虚实换位!", _get_stance_color().lightened(0.25), 1.05)
+
+		elif dir == "down":
+			# 向下派生：折光地雷阵
+			var trap := INFJPrismConstruct.new()
+			trap.kind = INFJPrismConstruct.Kind.PRISM_TRAP
+			trap.owner_fighter = self
+			trap.global_position = Vector2(clampf(global_position.x + facing * (64.0 + level * 24.0), 240.0, 1560.0), global_position.y)
+			trap.damage = 8 + level * 3
+			trap.tint_color = _get_stance_color()
+			trap.max_lifetime = 4.5 + float(level) * 0.6
+			get_parent().add_child(trap)
+			AudioManager.play_sfx("charge_2", -4.0, 1.05)
+			if vfx:
+				vfx.spawn_floating_text(global_position + Vector2(0.0, -108.0), "折光陷阱!", Color("#fde047"), 1.0)
+
 		elif dir == "back":
-			# 向后派生：优雅后撤瞬步 + 原地留雷
-			if vfx:
-				vfx.spawn_ghost(sprite, Color("#34d399"), 0.28)
-				vfx.spawn_floating_text(global_position + Vector2(0.0, -112.0), "礼貌撤离!", Color("#6ee7b7"), 1.0)
-			_spawn_orb(Vector2(0.0, -44.0), Vector2.ZERO, 8 + level * 3, Vector2(-facing * 260.0, -220.0), 16.0, 1.6, Color("#34d399"), "保持距离!", true, 92.0 + level * 20.0)
+			# 向后派生：残影撤步（原地留下会模仿发射光刃的残影！）
+			var old_pos2 := global_position
+			var decoy2 := INFJPrismConstruct.new()
+			decoy2.kind = INFJPrismConstruct.Kind.DECOY_ILLUSION
+			decoy2.owner_fighter = self
+			decoy2.global_position = old_pos2
+			decoy2.damage = 8 + level * 2
+			decoy2.facing_dir = facing
+			decoy2.tint_color = _get_stance_color()
+			decoy2.mimic_on_spawn = true
+			decoy2.max_lifetime = 1.8
+			get_parent().add_child(decoy2)
+
 			global_position.x = clampf(global_position.x - facing * 125.0, 220.0, 1580.0)
-			invincible_timer = maxf(invincible_timer, 0.2)
-			AudioManager.play_sfx("dash", -4.0, 1.15)
-		elif dir == "up":
-			# 向上派生：对空扇形灵弹幕
-			var count: int = 2 + level
-			for i in range(count):
-				var deg: float = -18.0 - float(i) * (44.0 / float(maxi(1, count - 1)))
-				var ang: float = deg_to_rad(deg)
-				var spd: float = 560.0 + level * 60.0
-				_spawn_orb(Vector2(facing * 32.0, -64.0), Vector2(facing * cos(ang) * spd, sin(ang) * spd), 6 + level * 2, Vector2(facing * 220.0, -230.0), 15.0 + level * 2.0, 0.9, Color("#6ee7b7"), "洞察预判!" if i == 0 else "")
+			invincible_timer = maxf(invincible_timer, 0.18)
+			AudioManager.play_sfx("dash", -3.5, 1.15)
 			if vfx:
-				vfx.spawn_floating_text(global_position + Vector2(0.0, -112.0), "星辉对空阵!", Color("#6ee7b7"), 1.04)
+				vfx.spawn_ghost(sprite, _get_stance_color(), 0.26)
+				vfx.spawn_floating_text(global_position + Vector2(0.0, -110.0), "残影撤步!", _get_stance_color().lightened(0.25), 1.02)
+
 		else:
-			# 平射 / 前向：连发高速洞察灵弹
-			var spd_mult: float = 1.22 if dir == "forward" else 1.0
-			var orbs: int = level
-			for i in range(orbs):
-				var y_off: float = -56.0 + float(i - (orbs - 1) * 0.5) * 24.0
-				_spawn_orb(Vector2(facing * (38.0 + i * 18.0), y_off), Vector2(facing * (600.0 + level * 70.0) * spd_mult, 0.0), 7 + level * 3, Vector2(facing * (250.0 + level * 55.0), -150.0), 16.0 + level * 3.0, 0.95, Color("#fde047") if level >= 3 else Color("#10b981"), "直觉贯通!" if i == 0 else "")
+			# 平射 / 前向：千面折射光刃（撞地/撞墙折角反弹并自动微调追击！）
+			var blade := INFJPrismConstruct.new()
+			blade.kind = INFJPrismConstruct.Kind.BOUNCE_BLADE
+			blade.owner_fighter = self
+			blade.global_position = global_position + Vector2(facing * 38.0, -56.0)
+			var spd: float = (620.0 + level * 65.0) * (1.15 if dir == "forward" else 1.0)
+			# 里态默认斜向下发射制造地面折射奇袭；表态平直高速切入
+			var vy: float = 280.0 if stance == Stance.SHADOW else (0.0 if dir != "forward" else -90.0)
+			blade.velocity = Vector2(facing * spd, vy).normalized() * spd
+			blade.damage = 7 + level * 3
+			blade.knockback = Vector2(facing * (250.0 + level * 55.0), -170.0)
+			blade.bounces_left = level
+			blade.max_lifetime = 1.25 + float(level) * 0.35
+			blade.tint_color = Color("#fde047") if level >= 3 else _get_stance_color()
+			get_parent().add_child(blade)
+			AudioManager.play_sfx("skill_wave", -3.0, 1.18 + level * 0.06)
 			if vfx:
-				vfx.spawn_floating_text(global_position + Vector2(0.0, -112.0), "MAX·洞察连弹!" if level >= 3 else "洞察灵弹!", Color("#fde047") if level >= 3 else Color("#6ee7b7"), 1.05)
+				vfx.spawn_floating_text(global_position + Vector2(0.0, -110.0), "折射光刃·%d弹!" % level, blade.tint_color.lightened(0.2), 1.02)
+
 	else:
-		# 共情吸收（I/5）：展开绿色共情法盾，期间受击免伤并转化为大量 EP
-		skill2_cd = 6.2
-		action_anim_state = "skill"
-		action_anim_timer = 0.40
-		_play_anim("skill", true)
-		trigger_squash(0.90, 1.14)
-		empathy_shield_timer = 1.5 + float(level) * 0.55
-		AudioManager.play_sfx("aura_buff", -2.5, 1.05 + level * 0.05)
+		# 技能 2（I/5）：面具切换 · 表里反转（轻按秒切连段取消，满蓄开启表里双生！）
+		stance = Stance.SHADOW if stance == Stance.SURFACE else Stance.SURFACE
+		theme_color = _get_stance_color()
+		invincible_timer = maxf(invincible_timer, 0.16)
+		basic_cd = 0.0
+		action_anim_timer = 0.0
+		action_anim_state = ""
+		can_hit_cancel = true
+		skill2_cd = 0.85 if level == 1 else (3.6 if level == 2 else 6.8)
+		trigger_squash(0.86, 1.18)
+		AudioManager.play_sfx("aura_buff" if level >= 2 else "tech_roll", -2.5, 1.15 if stance == Stance.SHADOW else 0.96)
+
+		var stance_label: String = "里态 · 洞察!" if stance == Stance.SHADOW else "表态 · 共鸣!"
 		if vfx:
-			vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#34d399"), 16.0, 120.0 + level * 26.0, 0.34, 6.0)
-			vfx.spawn_floating_text(global_position + Vector2(0.0, -118.0), "共情吸收护盾!", Color("#4ade80"), 1.08)
-		# 2/3 档蓄力释放时震退贴身敌人
+			vfx.spawn_ghost(sprite, theme_color, 0.26)
+			vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), theme_color, 14.0, 86.0 + float(level) * 28.0, 0.26, 5.0)
+			vfx.spawn_floating_text(global_position + Vector2(0.0, -114.0), "表里双生!!" if level >= 3 else stance_label, Color("#fde047") if level >= 3 else theme_color.lightened(0.22), 1.16 if level >= 3 else 1.04)
+
 		if level >= 2:
-			var rad: float = 120.0 + level * 32.0
+			ep = minf(100.0, ep + (12.0 if level == 2 else 18.0))
 			for node in get_tree().get_nodes_in_group("fighters"):
 				if node == self or not (node is BaseFighter):
 					continue
 				var target := node as BaseFighter
 				if target.is_ko:
 					continue
-				if target.global_position.distance_to(global_position) <= rad:
+				if target.global_position.distance_to(global_position) <= 135.0 + float(level) * 20.0:
 					var push_d: float = signf(target.global_position.x - global_position.x)
 					if push_d == 0.0:
 						push_d = float(facing)
-					target.take_damage(5 + level * 2, Vector2(push_d * 320.0, -200.0), self, false)
+					target.take_damage(6 + level * 2, Vector2(push_d * 310.0, -210.0), self, false)
 
-func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false) -> void:
-	# 共情吸收护盾核心机制：拦截非必杀伤害，免伤并转化为 2.2 倍 EP！
-	if empathy_shield_timer > 0.0 and not is_ultimate and not is_ko:
-		var gained_ep: float = minf(100.0 - ep, float(amount) * 2.2)
-		ep = minf(100.0, ep + float(amount) * 2.2)
-		AudioManager.play_sfx("charge_3", -2.0, 1.08)
-		var vfx := BattleVFX.get_current(get_tree())
-		if vfx:
-			vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#4ade80"), 18.0, 116.0, 0.28, 6.0)
-			vfx.spawn_hit_particles(global_position + Vector2(0.0, -48.0), Color("#fde047"), 14, 240.0)
-			vfx.spawn_floating_text(global_position + Vector2(0.0, -112.0), "共情吸收! +%d EP" % int(round(maxf(5.0, gained_ep))), Color("#4ade80"), 1.08)
-		GameManager.trigger_hitstop(0.06)
-		return
-	super.take_damage(amount, knockback, attacker, is_ultimate)
+		if level >= 3:
+			dual_persona_timer = 5.5
 
 func on_ultimate_cast() -> void:
-	# Door Slam · 关门大吉：全屏特写 + 在对手位置召唤巨型翡翠符文石门拍飞并清空增益
+	# 万花筒心域 · Kaleidoscope：多面体镜界展开 + 表里幻影四向交错穿刺 + 镜界坍缩终结
 	AudioManager.play_sfx("ult_cast", -1.0)
-	invincible_timer = 0.9
+	invincible_timer = 0.95
 	action_anim_state = "skill"
 	action_anim_timer = 0.72
 	_play_anim("skill", true)
@@ -197,44 +340,80 @@ func on_ultimate_cast() -> void:
 
 	var vfx := BattleVFX.get_current(get_tree())
 	if vfx:
-		vfx.play_ult_cutin("INFJ", "DOOR SLAM · 关门大吉!!", GameManager.get_portrait_texture("infj"), Color("#10b981"), facing)
-	GameManager.trigger_hitstop(0.22)
+		vfx.play_ult_cutin("INFJ", "KALEIDOSCOPE · 万花筒心域!!", GameManager.get_portrait_texture("infj"), SHADOW_COLOR, facing)
+	GameManager.trigger_hitstop(0.20)
 
-	var target_pos: Vector2 = global_position + Vector2(facing * 260.0, 0.0)
+	var target_pos: Vector2 = global_position + Vector2(facing * 240.0, -52.0)
 	for node in get_tree().get_nodes_in_group("fighters"):
 		if node != self and node is BaseFighter and not (node as BaseFighter).is_ko:
-			target_pos = (node as BaseFighter).global_position
+			target_pos = (node as BaseFighter).global_position + Vector2(0.0, -52.0)
 			break
 
-	var door := DoorSlamEffect.new()
-	door.owner_fighter = self
-	door.impact_pos = target_pos
-	door.knockback_dir = signf(target_pos.x - global_position.x)
-	if door.knockback_dir == 0.0:
-		door.knockback_dir = float(facing)
-	get_parent().add_child(door)
-
-func _spawn_orb(offset_pos: Vector2, vel: Vector2, dmg: int, kb: Vector2, radius: float, life: float, col: Color, callout: String, is_mine: bool = false, exp_r: float = 96.0) -> void:
-	var orb := MysticOrbProjectile.new()
-	orb.owner_fighter = self
-	orb.global_position = global_position + offset_pos
-	orb.velocity = vel
-	orb.damage = dmg
-	orb.knockback = kb
-	orb.orb_radius = radius
-	orb.hit_radius = radius + 16.0
-	orb.max_lifetime = life
-	orb.tint_color = col
-	orb.hit_callout = callout
-	orb.is_mine = is_mine
-	orb.explode_radius = exp_r
-	get_parent().add_child(orb)
+	var ult := INFJPrismConstruct.new()
+	ult.kind = INFJPrismConstruct.Kind.KALEIDOSCOPE_ULT
+	ult.owner_fighter = self
+	ult.global_position = target_pos
+	ult.facing_dir = facing
+	ult.tint_color = SURFACE_COLOR
+	ult.secondary_color = SHADOW_COLOR
+	get_parent().add_child(ult)
 
 func _draw() -> void:
 	super._draw()
-	if empathy_shield_timer > 0.0 and not is_ko:
-		var pulse: float = 0.5 + 0.5 * sin(_shield_pulse)
-		var r: float = 54.0 + pulse * 6.0
-		draw_circle(Vector2(0.0, -52.0), r, Color(0.12, 0.85, 0.58, 0.16 + pulse * 0.08))
-		draw_arc(Vector2(0.0, -52.0), r, 0.0, TAU, 36, Color(0.35, 1.0, 0.72, 0.78), 4.0, true)
-		draw_arc(Vector2(0.0, -52.0), r + 7.0, _shield_pulse * 0.5, _shield_pulse * 0.5 + PI * 1.35, 24, Color(0.99, 0.92, 0.42, 0.65), 2.5, true)
+	if is_ko:
+		return
+	# 60fps 丝滑低多边形 3D 旋转八面体棱镜 + 3 颗绕转微晶（悬浮于魔杖尖端，随【表/里】姿态无级变色！）
+	var t: float = _breath_time
+	var is_idle_now: bool = (_current_anim == "idle" and is_on_floor() and action_anim_timer <= 0.0 and not guarding)
+	var bob: float = sin(t * 2.6) * 5.0
+	var pos := Vector2(float(facing) * (44.0 if is_idle_now else -34.0), (-118.0 if is_idle_now else -98.0) + bob)
+
+	# 60fps 柔和色相流转：表态在翡翠绿⇄金绿间呼吸，里态在幽紫⇄青碧间流转，表里双生呈璀璨金绿紫
+	var wave: float = 0.5 + 0.5 * sin(t * 1.8)
+	var c_base: Color
+	var c_hi: Color
+	var c_dark: Color
+	if dual_persona_timer > 0.0:
+		c_base = SURFACE_COLOR.lerp(SHADOW_COLOR, wave)
+		c_hi = Color("#fde047")
+		c_dark = c_base.darkened(0.32)
+	elif stance == Stance.SURFACE:
+		c_base = Color("#34d399").lerp(Color("#a3e635"), wave * 0.65)
+		c_hi = Color("#fef08a").lerp(Color("#a7f3d0"), 1.0 - wave)
+		c_dark = Color("#047857")
+	else:
+		c_base = Color("#8b5cf6").lerp(Color("#2dd4bf"), wave * 0.55)
+		c_hi = Color("#ddd6fe").lerp(Color("#99f6e4"), wave)
+		c_dark = Color("#4c1d95")
+
+	# 3D 投影八面体 4 个侧面实时旋转（60fps 绝对丝滑！）
+	var rot_spd: float = 1.65 if is_idle_now else 2.6
+	var yaw: float = t * rot_spd
+	var rx: float = 14.5 if is_idle_now else 11.5
+	var ry: float = 21.0 if is_idle_now else 16.5
+	var top_p := pos + Vector2(0.0, -ry)
+	var bot_p := pos + Vector2(0.0, ry)
+	var mid_x: float = sin(yaw) * rx
+	var left_p := pos + Vector2(-rx, 0.0)
+	var right_p := pos + Vector2(rx, 0.0)
+	var ridge_p := pos + Vector2(mid_x, 2.5 * cos(yaw))
+
+	# 左侧上下两切面
+	draw_colored_polygon(PackedVector2Array([top_p, ridge_p, left_p]), c_hi)
+	draw_colored_polygon(PackedVector2Array([bot_p, left_p, ridge_p]), c_base)
+	# 右侧上下两切面
+	draw_colored_polygon(PackedVector2Array([top_p, right_p, ridge_p]), c_base.lightened(0.12))
+	draw_colored_polygon(PackedVector2Array([bot_p, ridge_p, right_p]), c_dark)
+
+	# 3 颗 60fps 椭圆轨道绕转的微小低多边形菱形碎片
+	for i in range(3):
+		var a: float = yaw * 1.25 + float(i) * (TAU / 3.0)
+		var sp := pos + Vector2(cos(a) * (rx + 9.0), sin(a) * 10.5)
+		var sc: float = 3.6 if sin(a) >= 0.0 else 2.4
+		var shard_col: Color = c_hi if (i % 2 == 0) else c_base
+		draw_colored_polygon(PackedVector2Array([
+			sp + Vector2(0.0, -sc * 1.4),
+			sp + Vector2(sc, 0.0),
+			sp + Vector2(0.0, sc * 1.4),
+			sp + Vector2(-sc, 0.0)
+		]), Color(shard_col.r, shard_col.g, shard_col.b, 0.92))
