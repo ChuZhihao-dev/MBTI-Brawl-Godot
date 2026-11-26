@@ -12,6 +12,9 @@ var dual_persona_timer: float = 0.0
 var _combo_count: int = 0
 var _combo_reset_timer: float = 0.0
 var _emblem_phase: float = 0.0
+var _blink_warped: bool = false
+var _blink_origin: Vector2 = Vector2.ZERO
+var _blink_trail_timer: float = 0.0
 
 func _ready() -> void:
 	fighter_id = "infj"
@@ -34,6 +37,56 @@ func _get_attack_speed_mult() -> float:
 		mult += 0.12
 	return mult
 
+func _get_dash_duration() -> float:
+	return 0.28
+
+func _use_blink_dash() -> bool:
+	return true
+
+func _process_blink_dash(delta: float) -> void:
+	# 大乱斗级丝滑三段式「消失帧瞬移」：
+	# 0.00~0.065s 极速原地收束 -> 0.065~0.135s 彻底隐身瞬移（支持按住上键斜上闪上浮台！） -> 0.135~0.28s 开门丝滑踏出
+	var elapsed: float = _get_dash_duration() - dash_timer
+	if elapsed < 0.065:
+		_blink_warped = false
+		velocity.x = move_toward(velocity.x, 0.0, 2600.0 * delta)
+		velocity.y = minf(velocity.y, 0.0)
+		if sprite:
+			sprite.visible = true
+	elif elapsed < 0.135:
+		if not _blink_warped:
+			_blink_warped = true
+			_blink_origin = global_position
+			_blink_trail_timer = 0.18
+			var inp: Dictionary = _read_inputs()
+			var up_blink: bool = bool(inp.get("up_held", false))
+			var dx: float = float(dash_dir) * (155.0 if up_blink else 210.0)
+			var dy: float = -115.0 if up_blink else 0.0
+			global_position.x = clampf(global_position.x + dx, 220.0, 1580.0)
+			global_position.y = maxf(185.0, global_position.y + dy)
+			velocity = Vector2(float(dash_dir) * 230.0, -90.0 if up_blink else 0.0)
+			var vfx := BattleVFX.get_current(get_tree())
+			if vfx:
+				vfx.spawn_shockwave_ring(_blink_origin + Vector2(0.0, -52.0), theme_color, 8.0, 62.0, 0.18, 3.5)
+				vfx.spawn_ember_burst(_blink_origin + Vector2(0.0, -52.0), Color("#fde047"), 8)
+				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -52.0), Color("#fde047"), 10.0, 74.0, 0.20, 4.0)
+				vfx.spawn_ember_burst(global_position + Vector2(0.0, -52.0), theme_color.lightened(0.25), 10)
+		if sprite:
+			sprite.visible = false
+	else:
+		# 终点现身附带顺滑前踏惯性，自然减速不硬刹！
+		velocity.x = move_toward(velocity.x, 0.0, 1450.0 * delta)
+		if sprite:
+			sprite.visible = true
+		# 现身阶段支持极早取消衔接轻/重击，连招超顺手
+		if elapsed > 0.18 and basic_cd <= 0.0 and attack_buffer_timer > 0.0:
+			dash_timer = 0.0
+			attack_buffer_timer = 0.0
+			if attack_buffer_type == "light":
+				_perform_light_attack()
+			else:
+				_perform_heavy_attack()
+
 func get_active_buff_status() -> String:
 	var parts: Array[String] = []
 	parts.append("【表·共鸣】" if stance == Stance.SURFACE else "【里·洞察】")
@@ -54,6 +107,7 @@ func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void
 
 func _physics_process(delta: float) -> void:
 	_emblem_phase += delta * 4.2
+	_blink_trail_timer = maxf(0.0, _blink_trail_timer - delta)
 	if dual_persona_timer > 0.0:
 		dual_persona_timer = maxf(0.0, dual_persona_timer - delta)
 		if int(floor(_emblem_phase)) != int(floor(_emblem_phase - delta * 4.2)):
@@ -80,12 +134,35 @@ func _physics_process(delta: float) -> void:
 
 	super._physics_process(delta)
 
-	# 60fps 极柔和呼吸微动（与 2.14s 慢速棱镜循环叠合，消除帧切生硬感）
-	if sprite and sprite.visible and _current_anim == "idle" and not is_ko:
-		var b_sy: float = 1.0 + sin(_breath_time * 2.9) * 0.018
-		var b_sx: float = 1.0 - sin(_breath_time * 2.9) * 0.010
-		sprite.scale = Vector2(sprite.scale.x * b_sx, sprite.scale.y * b_sy)
-		sprite.position.y = -target_sprite_height * 0.5 * b_sy + 4.0
+	# 60fps 极柔和呼吸微动（与 16 帧待机叠合，消除帧切生硬感）；晶格瞬移时精确锁定三段帧、弹性缩放与显隐
+	if sprite and dash_timer > 0.0:
+		sprite.rotation = 0.0
+		var b_el: float = _get_dash_duration() - dash_timer
+		if b_el < 0.065:
+			sprite.visible = true
+			var p1: float = clampf(b_el / 0.065, 0.0, 1.0)
+			sprite.frame = clampi(int(floor(p1 * 4.0)), 0, 3)
+			var sx1: float = lerpf(1.0, 0.58, p1)
+			var sy1: float = lerpf(1.0, 1.12, p1)
+			sprite.scale = Vector2(_base_sprite_scale.x * sx1, _base_sprite_scale.y * sy1)
+		elif b_el < 0.135:
+			sprite.visible = false
+		else:
+			sprite.visible = true
+			var p2: float = clampf((b_el - 0.135) / 0.145, 0.0, 1.0)
+			sprite.frame = 8 + clampi(int(floor(p2 * 3.99)), 0, 3)
+			var sx2: float = lerpf(0.62, 1.0, minf(1.0, p2 * 1.45))
+			var sy2: float = lerpf(1.10, 1.0, minf(1.0, p2 * 1.45))
+			sprite.scale = Vector2(_base_sprite_scale.x * sx2, _base_sprite_scale.y * sy2)
+	else:
+		_blink_warped = false
+		if sprite and not sprite.visible and (rig == null or not rig.visible):
+			sprite.visible = true
+		if sprite and sprite.visible and _current_anim == "idle" and not is_ko:
+			var b_sy: float = 1.0 + sin(_breath_time * 2.9) * 0.018
+			var b_sx: float = 1.0 - sin(_breath_time * 2.9) * 0.010
+			sprite.scale = Vector2(sprite.scale.x * b_sx, sprite.scale.y * b_sy)
+			sprite.position.y = -target_sprite_height * 0.5 * b_sy + 4.0
 
 func _perform_light_attack() -> void:
 	_combo_count = (_combo_count % 3) + 1
@@ -359,6 +436,16 @@ func on_ultimate_cast() -> void:
 	get_parent().add_child(ult)
 
 func _draw() -> void:
+	# 60fps 空间折跃光带：连接瞬移起点与终点，让视觉轨迹极度顺滑不突兀
+	if _blink_trail_timer > 0.0:
+		var tr_a: float = clampf(_blink_trail_timer / 0.18, 0.0, 1.0)
+		var local_from: Vector2 = to_local(_blink_origin + Vector2(0.0, -52.0))
+		var local_to := Vector2(0.0, -52.0)
+		var col_t: Color = _get_stance_color()
+		draw_line(local_from, local_to, Color(col_t.r, col_t.g, col_t.b, 0.55 * tr_a), 14.0 * tr_a, true)
+		draw_line(local_from, local_to, Color(0.99, 0.94, 0.55, 0.88 * tr_a), 5.0 * tr_a, true)
+	if sprite and not sprite.visible:
+		return
 	super._draw()
 	if is_ko:
 		return

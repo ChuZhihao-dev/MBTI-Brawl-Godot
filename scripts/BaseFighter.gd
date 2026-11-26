@@ -464,6 +464,15 @@ func _get_attack_speed_mult() -> float:
 func _get_melee_range_bonus() -> float:
 	return 0.0
 
+func _get_dash_duration() -> float:
+	return 0.22
+
+func _use_blink_dash() -> bool:
+	return false
+
+func _process_blink_dash(_delta: float) -> void:
+	pass
+
 func _update_hit_flash(delta: float) -> void:
 	if hit_flash_timer <= 0.0:
 		return
@@ -691,37 +700,43 @@ func _physics_process(delta: float) -> void:
 		if bool(inp["dash_just"]) and dash_cd <= 0.0 and not guarding:
 			dash_dir = int(signf(horiz)) if horiz != 0.0 else facing
 			facing = dash_dir
-			dash_timer = 0.22
+			dash_timer = _get_dash_duration()
 			dash_cd = 0.85
-			invincible_timer = 0.16
+			invincible_timer = 0.24 if _use_blink_dash() else 0.16
 			dash_ghost_timer = 0.0
-			trigger_squash(1.22, 0.84)
+			if not _use_blink_dash():
+				trigger_squash(1.22, 0.84)
 			_update_facing_visual()
-			AudioManager.play_sfx("dash", -4.0, randf_range(0.95, 1.08))
+			AudioManager.play_sfx("tech_roll" if _use_blink_dash() else "dash", -3.5, randf_range(0.95, 1.08))
 			var vfx := BattleVFX.get_current(get_tree())
 			if vfx:
-				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -32.0), theme_color, 8.0, 48.0, 0.18, 3.0)
+				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0 if _use_blink_dash() else -32.0), theme_color, 8.0, 58.0 if _use_blink_dash() else 48.0, 0.22, 3.5)
+				if _use_blink_dash():
+					vfx.spawn_ember_burst(global_position + Vector2(0.0, -48.0), Color("#6ee7b7"), 10)
 
 		# 4. 水平移动、土狼跳与二段跳
 		var eff_speed: float = _get_effective_move_speed()
 		if dash_timer > 0.0:
-			velocity.x = dash_dir * eff_speed * 2.2
-			# 冲刺取消：冲刺中段可直接取消派生轻/重击！
-			if dash_timer < 0.16 and basic_cd <= 0.0 and attack_buffer_timer > 0.0:
-				dash_timer = 0.0
-				attack_buffer_timer = 0.0
-				if attack_buffer_type == "light":
-					_perform_light_attack()
-				else:
-					_perform_heavy_attack()
-			elif dash_ghost_timer <= 0.0:
-				dash_ghost_timer = 0.042
-				var vfx := BattleVFX.get_current(get_tree())
-				if vfx:
-					if rig != null and rig.visible:
-						rig.spawn_ghost_into(vfx, theme_color, 0.22)
+			if _use_blink_dash():
+				_process_blink_dash(delta)
+			else:
+				velocity.x = dash_dir * eff_speed * 2.2
+				# 冲刺取消：冲刺中段可直接取消派生轻/重击！
+				if dash_timer < 0.16 and basic_cd <= 0.0 and attack_buffer_timer > 0.0:
+					dash_timer = 0.0
+					attack_buffer_timer = 0.0
+					if attack_buffer_type == "light":
+						_perform_light_attack()
 					else:
-						vfx.spawn_ghost(sprite, theme_color, 0.22)
+						_perform_heavy_attack()
+				elif dash_ghost_timer <= 0.0:
+					dash_ghost_timer = 0.042
+					var vfx := BattleVFX.get_current(get_tree())
+					if vfx:
+						if rig != null and rig.visible:
+							rig.spawn_ghost_into(vfx, theme_color, 0.22)
+						else:
+							vfx.spawn_ghost(sprite, theme_color, 0.22)
 		elif not guarding:
 			# 普攻前摇阶段（Startup 第 1-6 帧）与重击起手允许角色微调朝向与微量惯性移动；其余攻击动作锁死转向
 			var in_light_startup: bool = action_anim_state == "light" and isfp_light_active and (0.20 - action_anim_timer < 0.10)

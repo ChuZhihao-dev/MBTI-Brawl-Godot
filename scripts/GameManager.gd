@@ -125,6 +125,7 @@ const SPRITE_SHEETS: Dictionary = {
 		"jump_startup": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 2, "fps": 16.0, "loop": false},
 		"jump": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 2, "frames": 4, "fps": 9.0, "loop": false},
 		"landing": {"path": "res://assets/fighters/infj/frames/v3/jump_sheet.png", "cols": 4, "rows": 2, "start": 6, "frames": 2, "fps": 14.0, "loop": false},
+		"dash": {"path": "res://assets/fighters/infj/frames/v3/dash_sheet.png", "cols": 4, "rows": 4, "start": 0, "frames": 12, "fps": 33.0, "loop": false},
 		"light": {"path": "res://assets/fighters/infj/frames/attack_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 15.0, "loop": false},
 		"heavy": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
 		"skill": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
