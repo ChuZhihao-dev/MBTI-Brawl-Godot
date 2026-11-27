@@ -28,6 +28,8 @@ var _p1_trail_bar: ProgressBar
 var _p2_trail_bar: ProgressBar
 var _p1_combo_lbl: Label
 var _p2_combo_lbl: Label
+var practice_panel
+
 signal practice_cooldowns_toggled(enabled: bool)
 signal practice_combat_toggled(enabled: bool)
 
@@ -62,6 +64,9 @@ func _ready() -> void:
 	_build_hud_extensions()
 	_build_pause_panel()
 	_build_ko_panel()
+	if GameManager.battle_mode == "practice":
+		practice_panel = preload("res://scripts/PracticePanel.gd").new()
+		add_child(practice_panel)
 	_refresh_key_hints()
 	AudioManager.mute_changed.connect(_on_mute_changed)
 	AudioManager.bgm_mute_changed.connect(_on_bgm_mute_changed)
@@ -71,6 +76,8 @@ func _ready() -> void:
 func bind_fighters(p1: BaseFighter, p2: BaseFighter) -> void:
 	_p1 = p1
 	_p2 = p2
+	if practice_panel != null:
+		practice_panel.bind_fighters(p1, p2)
 	if _p1:
 		_p1_trail_val = float(_p1.hp)
 	if _p2:
@@ -665,6 +672,9 @@ func _input(event: InputEvent) -> void:
 				AudioManager.play_sfx("ui_confirm")
 			_rebind_action = ""
 			_refresh_rebind_buttons()
+			get_viewport().set_input_as_handled()
+			return
+		if practice_panel != null and not _pause_overlay.visible and practice_panel.consume_shortcut(code):
 			get_viewport().set_input_as_handled()
 			return
 		if code == KEY_ESCAPE and not _ko_overlay.visible:

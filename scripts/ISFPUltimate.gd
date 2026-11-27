@@ -127,6 +127,10 @@ func start() -> void:
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay.shatter_duration = DURATION * float(FRAME_TICKS[BURST_FRAME - 1] + FRAME_TICKS[BURST_FRAME]) / original_ticks - BLOW_BEFORE_BURST
 	overlay.begin_frame(1)
+	var vfx := BattleVFX.get_current(get_tree())
+	if vfx:
+		vfx.play_ult_cutin(fighter.fighter_name, "灵棱缚影 · 笔裂千色",
+			GameManager.get_portrait_texture(fighter.fighter_id), fighter.theme_color, fighter.facing, 2.0)
 	AudioManager.play_sfx("ult_cast", -1.5)
 
 func _exit_tree() -> void:

@@ -367,7 +367,7 @@ func spawn_floating_text(pos: Vector2, text: String, color: Color = Color("#ffff
 	tw.chain().tween_property(holder, "modulate:a", 0.0, 0.22)
 	tw.chain().tween_callback(holder.queue_free)
 
-func play_ult_cutin(fighter_name: String, skill_title: String, portrait: Texture2D, theme_color: Color, facing: int = 1) -> void:
+func play_ult_cutin(fighter_name: String, skill_title: String, portrait: Texture2D, theme_color: Color, facing: int = 1, speed: float = 1.0) -> void:
 	if _overlay_layer == null:
 		return
 	trigger_screen_flash(Color("#fef08a"), 0.35, 0.25)
@@ -437,6 +437,7 @@ func play_ult_cutin(fighter_name: String, skill_title: String, portrait: Texture
 
 	var tw := create_tween()
 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.set_speed_scale(speed)
 	tw.set_parallel(true)
 	tw.tween_property(dim, "color:a", 0.6, 0.12)
 	tw.tween_property(pic, "position:x", target_x, 0.18).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)

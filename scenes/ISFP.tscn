@@ -11,6 +11,8 @@
 
 [ext_resource type="Script" path="res://scripts/ISFPUltimate.gd" id="9_ultimate"]
 
+[ext_resource type="Script" path="res://scripts/ISFPSkill2.gd" id="10_counter"]
+
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_8tlhf"]
 resource_local_to_scene = true
 shader = ExtResource("2_6cw2j")
@@ -545,3 +547,14 @@ script = ExtResource("9_ultimate")
 visible = false
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="PaintUltimate"]
+
+
+[node name="PaintCounter" type="Node2D" parent="." index="6"]
+script = ExtResource("10_counter")
+
+[node name="Pose" type="Sprite2D" parent="PaintCounter"]
+visible = false
+hframes = 6
+vframes = 2
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="PaintCounter"]

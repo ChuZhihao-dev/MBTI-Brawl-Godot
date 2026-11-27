@@ -13,6 +13,11 @@ var match_started: bool = false
 var round_ending: bool = false
 var match_ended: bool = false
 var practice_mode: bool = false
+var _practice_cooldowns := false
+var _practice_combat := false
+var _practice_behavior := 0
+var _practice_position := 0
+const PRACTICE_POSITIONS: Array[Vector2] = [Vector2(855.0, 945.0), Vector2(760.0, 1040.0), Vector2(1465.0, 1550.0)]
 
 @onready var camera: Camera2D = $SmashCamera2D
 @onready var hud: CanvasLayer = $HUD
@@ -79,8 +84,8 @@ func _ready() -> void:
 		old_p2.queue_free()
 
 	if practice_mode:
-		p1_spawn_pos.x = 810.0
-		p2_spawn_pos.x = 990.0
+		p1_spawn_pos.x = PRACTICE_POSITIONS[0].x
+		p2_spawn_pos.x = PRACTICE_POSITIONS[0].y
 	p1 = _spawn_fighter(GameManager.selected_p1, 1, p1_spawn_pos)
 	p2 = _spawn_fighter(GameManager.selected_p2, 2, p2_spawn_pos)
 
@@ -95,14 +100,12 @@ func _ready() -> void:
 		hud.set_round_scores(GameManager.p1_rounds, GameManager.p2_rounds)
 
 	if practice_mode:
-		p1.practice_full_energy = true
-		p2.practice_full_energy = true
-		p1.ep = 100.0
-		p2.ep = 100.0
-		_set_practice_cooldowns(false)
-		p2.is_ai_controlled = true
+		_configure_practice_fighters()
 		hud.practice_cooldowns_toggled.connect(_set_practice_cooldowns)
 		hud.practice_combat_toggled.connect(_set_practice_combat)
+		hud.practice_panel.reset_requested.connect(_reset_practice_positions)
+		hud.practice_panel.behavior_changed.connect(_set_practice_behavior)
+		hud.practice_panel.fighters_selected.connect(_replace_practice_fighters)
 		match_started = true
 	else:
 		_play_round_intro()
@@ -113,20 +116,75 @@ func _spawn_p2_ai(difficulty: String) -> void:
 	add_child(p2_ai)
 	p2_ai.setup(p2, p1, difficulty)
 
+func _configure_practice_fighters() -> void:
+	for fighter in [p1, p2]:
+		fighter.practice_full_energy = true
+		fighter.ep = 100.0
+	_set_practice_cooldowns(_practice_cooldowns)
+	_refresh_practice_controller()
+
 func _set_practice_cooldowns(enabled: bool) -> void:
+	_practice_cooldowns = enabled
 	p1.set_practice_skill_cooldowns(enabled)
 	p2.set_practice_skill_cooldowns(enabled)
 
 func _set_practice_combat(enabled: bool) -> void:
-	if enabled:
-		if not is_instance_valid(p2_ai):
-			_spawn_p2_ai("easy")
-	elif is_instance_valid(p2_ai):
+	_practice_combat = enabled
+	_refresh_practice_controller()
+
+func _set_practice_behavior(behavior: int) -> void:
+	_practice_behavior = behavior
+	_refresh_practice_controller()
+
+func _remove_p2_ai() -> void:
+	if is_instance_valid(p2_ai):
 		p2_ai.set_physics_process(false)
 		remove_child(p2_ai)
 		p2_ai.queue_free()
-		p2_ai = null
-		p2.clear_practice_dummy_input()
+	p2_ai = null
+
+func _refresh_practice_controller() -> void:
+	_remove_p2_ai()
+	p2.is_ai_controlled = true
+	p2.clear_practice_dummy_input()
+	if _practice_combat or _practice_behavior > 0:
+		_spawn_p2_ai("easy")
+		p2_ai.practice_behavior = 0 if _practice_combat else _practice_behavior
+
+func _clear_practice_projectiles() -> void:
+	for node in get_children():
+		if node is PaintBlobProjectile or node is PaintPuddleHazard or node is MysticOrbProjectile or node is SwordWaveProjectile:
+			remove_child(node)
+			node.queue_free()
+
+func _reset_practice_positions(preset: int) -> void:
+	if get_tree().paused:
+		return
+	_practice_position = clampi(preset, 0, PRACTICE_POSITIONS.size() - 1)
+	p1_spawn_pos.x = PRACTICE_POSITIONS[_practice_position].x
+	p2_spawn_pos.x = PRACTICE_POSITIONS[_practice_position].y
+	_clear_practice_projectiles()
+	p1.reset_for_new_round(p1_spawn_pos)
+	p2.reset_for_new_round(p2_spawn_pos)
+	_refresh_practice_controller()
+
+func _replace_practice_fighters(first_id: String, second_id: String) -> void:
+	if first_id == p1.fighter_id and second_id == p2.fighter_id:
+		return
+	_remove_p2_ai()
+	_clear_practice_projectiles()
+	for fighter in [p1, p2]:
+		remove_child(fighter)
+		fighter.queue_free()
+	GameManager.selected_p1 = first_id
+	GameManager.selected_p2 = second_id
+	p1 = _spawn_fighter(first_id, 1, p1_spawn_pos)
+	p2 = _spawn_fighter(second_id, 2, p2_spawn_pos)
+	p1.reset_for_new_round(p1_spawn_pos)
+	p2.reset_for_new_round(p2_spawn_pos)
+	_configure_practice_fighters()
+	camera.set_targets(p1, p2)
+	hud.bind_fighters(p1, p2)
 
 func _exit_tree() -> void:
 	AudioManager.stop_bgm()
@@ -198,7 +256,7 @@ func _on_fighter_ko(loser: BaseFighter, _killer: BaseFighter, by_ultimate: bool)
 	_finish_round(winner, "ULTIMATE FINISH!" if by_ultimate else "K.O.!", by_ultimate)
 
 func _respawn_practice_fighter(fighter: BaseFighter) -> void:
-	if is_instance_valid(fighter) and fighter.is_ko:
+	if is_instance_valid(fighter) and fighter.is_inside_tree() and fighter.is_ko:
 		var spawn_pos := p1_spawn_pos if fighter == p1 else p2_spawn_pos
 		fighter.reset_for_new_round(spawn_pos)
 

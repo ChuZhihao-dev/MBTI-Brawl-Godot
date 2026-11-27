@@ -5,6 +5,9 @@ var fighter: BaseFighter
 var opponent: BaseFighter
 var difficulty: String = "normal"
 
+var practice_behavior := 0
+var _counter_pending := false
+
 var _think_timer: float = 0.0
 var _desired_horiz: float = 0.0
 var _guard_timer: float = 0.0
@@ -38,6 +41,24 @@ func _physics_process(delta: float) -> void:
 		"skill2_just": false,
 		"ult_just": false
 	}
+
+	if practice_behavior > 0:
+		match practice_behavior:
+			1:
+				inp["guard_held"] = true
+			2:
+				inp["up_just"] = fighter.is_on_floor() and fighter.hitstun_timer <= 0.0
+				inp["up_held"] = true
+			3:
+				if fighter.hitstun_timer > 0.0:
+					_counter_pending = true
+				elif _counter_pending and fighter.basic_cd <= 0.0 and fighter.action_anim_timer <= 0.0:
+					inp["light_just"] = true
+					_counter_pending = false
+			4:
+				inp["light_just"] = fighter.hitstun_timer <= 0.0 and fighter.basic_cd <= 0.0 and fighter.action_anim_timer <= 0.0
+		fighter.ai_input = inp
+		return
 
 	if difficulty == "easy":
 		_think_timer = maxf(0.0, _think_timer - delta)

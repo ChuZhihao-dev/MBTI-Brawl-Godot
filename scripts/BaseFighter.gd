@@ -28,6 +28,9 @@ var battle_locked: bool = false
 # AI 接管支持（任意角色自动支持 1P vs AI 对战）
 var is_ai_controlled: bool = false
 var practice_full_energy := false
+var practice_last_damage := 0
+var practice_best_hits := 0
+var practice_best_damage := 0
 var practice_skip_skill_cooldowns := false
 var ai_input: Dictionary = {}
 
@@ -112,6 +115,9 @@ var hitbox_active_timer: float = 0.0
 # 记录 BaseFighter 初始默认的 Hitbox 尺寸与偏移（供未定制角色的普攻使用）
 var default_hitbox_size: Vector2 = Vector2(48.0, 40.0)
 var default_hitbox_pos: Vector2 = Vector2(40.0, -48.0)
+
+var paint_counter_knockback := false
+@onready var paint_counter = get_node_or_null("PaintCounter")
 
 var isfp_ultimate_owner: BaseFighter
 @onready var paint_ultimate = get_node_or_null("PaintUltimate")
@@ -215,6 +221,9 @@ func get_active_buff_status() -> String:
 	return ""
 
 func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void:
+	if paint_counter != null:
+		paint_counter.finish()
+	paint_counter_knockback = false
 	if paint_ultimate != null:
 		paint_ultimate.finish()
 	isfp_ultimate_owner = null
@@ -555,6 +564,8 @@ func _physics_process(delta: float) -> void:
 			GameManager.combo_updated.emit(player_index, 0, 0)
 
 	_update_hit_flash(delta)
+	if paint_counter != null and (battle_locked or is_ko):
+		paint_counter.finish()
 
 	if paint_ultimate != null and paint_ultimate.active:
 		return
@@ -611,6 +622,17 @@ func _physics_process(delta: float) -> void:
 	var guard_held: bool = bool(inp["guard_held"])
 	var up_pressed: bool = bool(inp["up_just"])
 	var up_held: bool = bool(inp["up_held"])
+
+	if paint_counter != null:
+		if paint_counter.active:
+			if paint_counter.tick(delta, inp):
+				queue_redraw()
+				return
+		elif can_act and bool(inp["skill2_just"]) and skill2_cd <= 0.0 and dash_timer <= 0.0 and charging_slot == "" and (action_anim_timer <= 0.0 or can_cancel_attack):
+			paint_counter.start()
+			paint_counter.tick(delta, inp)
+			queue_redraw()
+			return
 
 	# 受击硬直期间按下闪避键（L/3）预存受身窗口，落地瞬间触发无敌受身翻滚
 	if hitstun_timer > 0.0 and bool(inp["dash_just"]):
@@ -782,7 +804,11 @@ func _physics_process(delta: float) -> void:
 		# 空中受击方向影响（DI）：受击硬直时按左右方向微调击飞轨迹
 		if hitstun_timer > 0.0 and horiz != 0.0:
 			velocity.x += horiz * 280.0 * delta
-		velocity.x = move_toward(velocity.x, 0.0, 620.0 * delta)
+		if paint_counter_knockback and hitstun_timer > 0.0:
+			velocity.x *= pow(0.84, delta * 60.0)
+		else:
+			paint_counter_knockback = false
+			velocity.x = move_toward(velocity.x, 0.0, 620.0 * delta)
 
 	# 护盾耐久消耗与自动恢复
 	if guarding:
@@ -799,7 +825,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 	# 墙角弹墙（Wall Bounce）：高速受击撞到舞台左右边界时触发反弹连段机会
-	if hitstun_timer > 0.0 and not _wall_bounced_in_stun and (global_position.x <= 224.0 or global_position.x >= 1576.0) and absf(velocity.x) > 340.0:
+	if hitstun_timer > 0.0 and not paint_counter_knockback and not _wall_bounced_in_stun and (global_position.x <= 224.0 or global_position.x >= 1576.0) and absf(velocity.x) > 340.0:
 		_wall_bounced_in_stun = true
 		velocity.x = -velocity.x * 0.72
 		velocity.y = minf(velocity.y, -280.0)
@@ -943,8 +969,8 @@ func _perform_light_attack() -> void:
 func _check_isfp_light_hitbox() -> void:
 	if light_attack_hit_registered:
 		return
-	# fighter_light 甩笔泼墨视觉覆盖宽度精确对齐 Hitbox 判定距离（128px）
-	var hit: bool = _perform_melee(8, Vector2(facing * 220.0, -90.0), false, 128.0)
+	var reach := 88.0 if action_anim_timer <= 0.084 else 76.0
+	var hit := _check_isfp_attack_box(Rect2(-8.0, -96.0, reach + 8.0, 48.0), 8, Vector2(facing * 220.0, -90.0))
 	if hit:
 		light_attack_hit_registered = true
 		has_hit_target_in_attack = true
@@ -982,13 +1008,33 @@ func _perform_heavy_attack() -> void:
 func _check_isfp_heavy_hitbox() -> void:
 	if heavy_attack_hit_registered:
 		return
-	# fighter_thump 沉稳下劈打击，判定范围与特效宽度完全吻合（145px），带明显击退与浮空离地感
-	var hit: bool = _perform_melee(14, Vector2(facing * 340.0, -230.0), true, 145.0)
+	var reach := 82.0 if action_anim_timer > 0.16 else 108.0
+	var hit := _check_isfp_attack_box(Rect2(-6.0, -108.0, reach + 6.0, 62.0), 14, Vector2(facing * 340.0, -230.0))
 	if hit:
 		heavy_attack_hit_registered = true
 		has_hit_target_in_attack = true
 		can_cancel_attack = true
 		can_hit_cancel = true
+
+func _check_isfp_attack_box(local_box: Rect2, damage: int, knockback: Vector2) -> bool:
+	if facing < 0:
+		local_box.position.x = -local_box.end.x
+	var attack_box := Rect2(global_position + local_box.position, local_box.size)
+	for node in get_tree().get_nodes_in_group("fighters"):
+		var target := node as BaseFighter
+		if target == null or target == self or target.is_ko or target.hp <= 0:
+			continue
+		if target.invincible_timer > 0.0 or target.is_isfp_ultimate_invulnerable():
+			continue
+		var hurtbox := target.get_node("Hurtbox/CollisionShape2D") as CollisionShape2D
+		var shape := hurtbox.shape as RectangleShape2D
+		if hurtbox.disabled or shape == null:
+			continue
+		var bounds := hurtbox.global_transform * Rect2(-shape.size * 0.5, shape.size)
+		if attack_box.intersects(bounds):
+			target.take_damage(damage, knockback, self)
+			return true
+	return false
 
 func _process_charge_skill(delta: float, can_act: bool, horiz: float, guard_held: bool, up_held: bool, inp: Dictionary) -> bool:
 	if not can_act:
@@ -1048,7 +1094,7 @@ func _process_charge_skill(delta: float, can_act: bool, horiz: float, guard_held
 		charge_dir = aim if aim != "" else "neutral"
 		AudioManager.play_sfx("charge_1", -7.0)
 		return true
-	if bool(inp["skill2_just"]) and skill2_cd <= 0.0:
+	if paint_counter == null and bool(inp["skill2_just"]) and skill2_cd <= 0.0:
 		charging_slot = "skill2"
 		charge_elapsed = 0.0
 		charge_level = 1
@@ -1163,6 +1209,10 @@ func _perform_melee(damage: int, knockback: Vector2, is_heavy: bool, custom_rang
 func register_combo_hit(dealt_damage: int) -> void:
 	current_combo_hits += 1
 	current_combo_damage += dealt_damage
+	if practice_full_energy:
+		practice_last_damage = dealt_damage
+		practice_best_hits = maxi(practice_best_hits, current_combo_hits)
+		practice_best_damage = maxi(practice_best_damage, current_combo_damage)
 	_combo_expire_timer = 1.65
 	GameManager.record_stat(player_index, "max_combo", current_combo_hits)
 	GameManager.combo_updated.emit(player_index, current_combo_hits, current_combo_damage)
@@ -1207,6 +1257,10 @@ func _trigger_air_slam_impact() -> void:
 func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false) -> void:
 	if is_ko or hp <= 0 or invincible_timer > 0.0 or is_isfp_ultimate_invulnerable():
 		return
+	if amount > 0 and paint_counter != null and paint_counter.absorb(attacker):
+		return
+	var counter_hit: bool = is_instance_valid(attacker) and attacker.paint_counter != null and attacker.paint_counter.applying_pulse
+	var counter_finisher: bool = counter_hit and attacker.paint_counter.finishing_pulse
 	var paint_combo: bool = is_ultimate and is_instance_valid(attacker) and isfp_ultimate_owner == attacker
 	var eff_amount: int = amount
 	var eff_kb: Vector2 = knockback
@@ -1255,7 +1309,7 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 	# 连击伤害递减与防无限连击退递增（Pushback Scaling 防止无限压制）
 	var scaled_amount: int = eff_amount
 	var pushback_mult: float = 1.0
-	if attacker and not is_ultimate and attacker.current_combo_hits >= 1:
+	if attacker and not is_ultimate and not counter_hit and attacker.current_combo_hits >= 1:
 		# 连续命中多次普攻时，逐步提升受击方水平击退距离，避免墙角无限循环
 		pushback_mult = 1.0 + float(attacker.current_combo_hits - 1) * 0.18
 		if attacker.current_combo_hits >= 2:
@@ -1271,7 +1325,10 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 
 	if super_armor_timer > 0.0 and not is_ultimate:
 		var armor_dmg: int = maxi(1, int(round(float(scaled_amount) * 0.7)))
+		var actual_damage := mini(hp, armor_dmg)
 		hp = maxi(0, hp - armor_dmg)
+		if attacker and attacker.practice_full_energy and actual_damage > 0:
+			attacker.register_combo_hit(actual_damage)
 		ep = minf(100.0, ep + armor_dmg * 0.9)
 		if attacker:
 			GameManager.record_stat(attacker.player_index, "damage", armor_dmg)
@@ -1286,26 +1343,33 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 
 	var is_light: bool = attacker != null and attacker.action_anim_state == "light" and not is_ultimate
 	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate or (attacker != null and attacker.action_anim_state == "heavy")) and not is_light
+	var actual_damage := mini(hp, scaled_amount)
 	hp = maxi(0, hp - scaled_amount)
 	ep = minf(100.0, ep + scaled_amount * 0.9)
 	if attacker:
 		attacker.ep = minf(100.0, attacker.ep + scaled_amount * (0.0 if is_ultimate else 1.1))
-		attacker.register_combo_hit(scaled_amount)
+		attacker.register_combo_hit(actual_damage if attacker.practice_full_energy else scaled_amount)
 		GameManager.record_stat(attacker.player_index, "damage", scaled_amount)
 	velocity = Vector2(eff_kb.x * pushback_mult, eff_kb.y)
 	# 受击硬直：轻击 10-12 帧（约 0.18s-0.20s）；重击沉稳 14-15 帧（0.24s）；奥义 0.28s
-	hitstun_timer = 0.28 if is_ultimate else (0.24 if is_heavy else (0.18 if is_light else 0.15))
+	hitstun_timer = (19.0 / 60.0 if counter_finisher else 0.13) if counter_hit else (0.28 if is_ultimate else (0.24 if is_heavy else (0.18 if is_light else 0.15)))
+	paint_counter_knockback = counter_finisher
 	# 受击闪白（Hit Flash）：轻击 2 帧（0.033s）；重击 3 帧（0.05s）；奥义 0.18s
-	hit_flash_timer = 2.0 / 60.0 if paint_combo else (0.18 if is_ultimate else (0.05 if is_heavy else (0.033 if is_light else 0.1)))
-	if paint_combo and sprite and sprite.material is ShaderMaterial:
+	hit_flash_timer = 2.0 / 60.0 if paint_combo or counter_hit else (0.18 if is_ultimate else (0.05 if is_heavy else (0.033 if is_light else 0.1)))
+	if (paint_combo or counter_hit) and sprite and sprite.material is ShaderMaterial:
 		sprite.material.set_shader_parameter("flash_amount", 1.0)
 	trigger_squash(0.82, 1.22 if is_heavy else 1.15)
 	AudioManager.play_sfx("hit_heavy" if is_heavy else "hit_light", -2.0 if is_heavy else -4.0, randf_range(0.93, 1.08))
 	if vfx:
 		var fx_col: Color = attacker.theme_color if attacker else theme_color
 		var is_paint: bool = (attacker != null and attacker.fighter_id == "isfp")
-		vfx.spawn_hit_fx(hit_pos, fx_col, is_heavy and not paint_combo, false, is_paint)
+		if not (is_paint and is_light):
+			vfx.spawn_hit_fx(hit_pos, fx_col, is_heavy and not paint_combo, false, is_paint)
 		vfx.spawn_floating_text(hit_pos + Vector2(0.0, -36.0), "-%d" % scaled_amount, Color("#fde047") if is_heavy else Color("#ffffff"), 1.25 if is_ultimate else (1.1 if is_heavy else 0.95))
+	if counter_hit:
+		if hp <= 0:
+			_trigger_ko(attacker, false)
+		return
 	if paint_combo:
 		if hp <= 0:
 			attacker.paint_ultimate.pending_ko = self
@@ -1325,6 +1389,8 @@ func _trigger_ko(killer: BaseFighter, by_ultimate: bool) -> void:
 	if is_ko:
 		return
 	is_ko = true
+	if paint_counter != null:
+		paint_counter.finish()
 	AudioManager.play_sfx("ko", -1.0)
 	var vfx := BattleVFX.get_current(get_tree())
 	if vfx:
