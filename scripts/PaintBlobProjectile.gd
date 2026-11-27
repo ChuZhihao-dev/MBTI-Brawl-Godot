@@ -99,18 +99,16 @@ func _on_hit_target(target: BaseFighter) -> void:
 	var facing_dir: float = signf(velocity.x) if absf(velocity.x) > 10.0 else (1.0 if owner_fighter == null else float(owner_fighter.facing))
 	var kb := Vector2(facing_dir * 180.0, -80.0)
 	
-	target.take_damage(damage, kb, owner_fighter, false)
-	# 强制特调为需求指定的轻硬直 (10 帧 = 0.166s)、受击闪白 (2 帧 = 0.033s) 与 3 帧 Hitstop (0.05s)
-	target.hitstun_timer = 0.166
-	target.hit_flash_timer = 0.033
-	GameManager.trigger_hitstop(0.05)
-	GameManager.trigger_shake(3.0, 0.08, Vector2(facing_dir, 0.0))
-
-	# 炸开飞溅粒子
-	var vfx := BattleVFX.get_current(get_tree())
-	if vfx:
-		vfx.spawn_paint_hit_sparks(global_position, false)
-	AudioManager.play_sfx("hit_light", -3.0, 1.15)
+	var interrupted := target.take_damage(damage, kb, owner_fighter, false, BaseFighter.AttackPriority.SKILL)
+	if interrupted:
+		target.hitstun_timer = 0.166
+		target.hit_flash_timer = 0.033
+		GameManager.trigger_hitstop(0.05)
+		GameManager.trigger_shake(3.0, 0.08, Vector2(facing_dir, 0.0))
+		var vfx := BattleVFX.get_current(get_tree())
+		if vfx:
+			vfx.spawn_paint_hit_sparks(global_position, false)
+		AudioManager.play_sfx("hit_light", -3.0, 1.15)
 
 	# 命中点下方自然滴落形成小型临时颜料滩（持续时间减半）
 	_spawn_puddle_at(global_position, true)

@@ -285,7 +285,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 				"arc_end": arc_end
 			})
 	else:
-		# 气焰共鸣（I/5）：蓄力震荡冲击波 + 2/3档短暂霸体 + 回血回能 + 10 秒强化 Buff
+		# 气焰共鸣（I/5）：蓄力震荡冲击波 + 施放动作霸体 + 回血回能 + 10 秒强化 Buff
 		skill2_cd = 6.5
 		action_anim_state = "aura_buff"
 		action_anim_timer = 0.56
@@ -293,8 +293,6 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 		AudioManager.play_sfx("aura_buff", -2.0, 0.96 + level * 0.05)
 
 		aura_buff_timer = 10.0
-		if level >= 2:
-			super_armor_timer = maxf(super_armor_timer, 0.35 if level == 2 else 0.55)
 		var heal_hp: int = 6 + (level - 1) * 4 + (1 if level == 3 else 0)
 		var gain_ep: float = 12.0 + (level - 1) * 9.0
 		hp = mini(max_hp, hp + heal_hp)
@@ -319,7 +317,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 				var push_dir: float = signf(target.global_position.x - global_position.x)
 				if push_dir == 0.0:
 					push_dir = float(facing)
-				target.take_damage(shock_dmg, Vector2(push_dir * (310.0 + level * 60.0), -230.0), self, false)
+				target.take_damage(shock_dmg, Vector2(push_dir * (310.0 + level * 60.0), -230.0), self, false, AttackPriority.SKILL)
 
 func on_ultimate_cast() -> void:
 	# 耀光破阵斩（O/6）：全屏特写 + 蓄力后释放超大耀金圆弧斩波 + 贴身破阵重劈（补齐近身盲区）

@@ -83,7 +83,7 @@ func _physics_process(delta: float) -> void:
 		var target_center: Vector2 = target.global_position + Vector2(0.0, -48.0)
 		if global_position.distance_to(target_center) <= hit_radius:
 			_hit_ids[tid] = true
-			target.take_damage(damage, knockback, owner_fighter, is_ultimate)
+			target.take_damage(damage, knockback, owner_fighter, is_ultimate, BaseFighter.AttackPriority.SKILL)
 			if not is_ultimate and charge_level < 3:
 				queue_free()
 				return

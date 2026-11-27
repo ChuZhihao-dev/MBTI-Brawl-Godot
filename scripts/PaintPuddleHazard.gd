@@ -82,7 +82,7 @@ func _physics_process(delta: float) -> void:
 		if node == owner_fighter or not (node is BaseFighter):
 			continue
 		var target := node as BaseFighter
-		if target.is_ko:
+		if target.is_ko or target.get_action_armor() > BaseFighter.AttackPriority.SKILL:
 			continue
 
 		var diff: Vector2 = target.global_position - global_position

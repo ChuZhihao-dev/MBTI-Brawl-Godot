@@ -306,6 +306,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 			var decoy := INFJPrismConstruct.new()
 			decoy.kind = INFJPrismConstruct.Kind.DECOY_ILLUSION
 			decoy.owner_fighter = self
+			decoy.attack_priority = AttackPriority.SKILL
 			decoy.global_position = old_pos
 			decoy.damage = 9 + level * 2
 			decoy.facing_dir = facing
@@ -326,6 +327,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 			var trap := INFJPrismConstruct.new()
 			trap.kind = INFJPrismConstruct.Kind.PRISM_TRAP
 			trap.owner_fighter = self
+			trap.attack_priority = AttackPriority.SKILL
 			trap.global_position = Vector2(clampf(global_position.x + facing * (64.0 + level * 24.0), 240.0, 1560.0), global_position.y)
 			trap.damage = 8 + level * 3
 			trap.tint_color = _get_stance_color()
@@ -341,6 +343,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 			var decoy2 := INFJPrismConstruct.new()
 			decoy2.kind = INFJPrismConstruct.Kind.DECOY_ILLUSION
 			decoy2.owner_fighter = self
+			decoy2.attack_priority = AttackPriority.SKILL
 			decoy2.global_position = old_pos2
 			decoy2.damage = 8 + level * 2
 			decoy2.facing_dir = facing
@@ -361,6 +364,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 			var blade := INFJPrismConstruct.new()
 			blade.kind = INFJPrismConstruct.Kind.BOUNCE_BLADE
 			blade.owner_fighter = self
+			blade.attack_priority = AttackPriority.SKILL
 			blade.global_position = global_position + Vector2(facing * 38.0, -56.0)
 			var spd: float = (620.0 + level * 65.0) * (1.15 if dir == "forward" else 1.0)
 			# 里态默认斜向下发射制造地面折射奇袭；表态平直高速切入
@@ -382,8 +386,9 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 		theme_color = _get_stance_color()
 		invincible_timer = maxf(invincible_timer, 0.16)
 		basic_cd = 0.0
-		action_anim_timer = 0.0
-		action_anim_state = ""
+		action_anim_timer = 0.16
+		action_anim_state = "stance_shift"
+		_play_anim("skill", true)
 		can_hit_cancel = true
 		skill2_cd = 0.85 if level == 1 else (3.6 if level == 2 else 6.8)
 		trigger_squash(0.86, 1.18)
@@ -407,7 +412,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 					var push_d: float = signf(target.global_position.x - global_position.x)
 					if push_d == 0.0:
 						push_d = float(facing)
-					target.take_damage(6 + level * 2, Vector2(push_d * 310.0, -210.0), self, false)
+					target.take_damage(6 + level * 2, Vector2(push_d * 310.0, -210.0), self, false, AttackPriority.SKILL)
 
 		if level >= 3:
 			dual_persona_timer = 5.5
@@ -416,7 +421,7 @@ func on_ultimate_cast() -> void:
 	# 万花筒心域 · Kaleidoscope：多面体镜界展开 + 表里幻影四向交错穿刺 + 镜界坍缩终结
 	AudioManager.play_sfx("ult_cast", -1.0)
 	invincible_timer = 0.95
-	action_anim_state = "skill"
+	action_anim_state = "ultimate"
 	action_anim_timer = 0.72
 	_play_anim("skill", true)
 	trigger_squash(0.88, 1.18)

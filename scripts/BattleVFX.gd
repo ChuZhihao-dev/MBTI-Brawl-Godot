@@ -85,6 +85,33 @@ func spawn_hit_fx(pos: Vector2, color: Color, is_heavy: bool = false, is_block: 
 	if is_heavy and not is_block:
 		trigger_screen_flash(fx_color.lightened(0.45), 0.22, 0.15)
 
+func spawn_paint_guard_break(pos: Vector2, facing: int) -> void:
+	var colors: Array[Color] = [Color("#facc15"), Color("#fb7185"), Color("#d85cf5"), Color("#22d3ee"), Color("#a3e635")]
+	var burst := Node2D.new()
+	burst.name = "PaintGuardBreak"
+	burst.position = to_local(pos)
+	add_child(burst)
+	for index in range(20):
+		var shard := Polygon2D.new()
+		var size := randf_range(4.0, 12.0)
+		shard.polygon = PackedVector2Array([Vector2(-size, 0.0), Vector2(size * 0.8, -size * 0.58),
+			Vector2(size * 0.45, size * 0.78)])
+		shard.color = colors[index % colors.size()]
+		shard.position = Vector2(randf_range(-7.0, 7.0), randf_range(-43.0, 43.0))
+		shard.rotation = randf_range(-PI, PI)
+		burst.add_child(shard)
+		var travel := Vector2(randf_range(25.0, 122.0) * facing, randf_range(-105.0, 96.0))
+		if index % 5 == 0:
+			travel.x *= -0.55
+		var twist := randf_range(-3.0, 3.0)
+		var scatter := shard.create_tween().set_parallel(true).set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		scatter.tween_property(shard, "position", shard.position + travel, 0.42).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		scatter.tween_property(shard, "rotation", shard.rotation + twist, 0.42)
+		scatter.tween_property(shard, "modulate:a", 0.0, 0.25).set_delay(0.17)
+	var cleanup := burst.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	cleanup.tween_interval(0.43)
+	cleanup.tween_callback(burst.queue_free)
+
 func spawn_paint_hit_sparks(pos: Vector2, is_heavy: bool = false) -> void:
 	# ISFP 专属多色彩高冲击颜料质感打击火花：琥珀金、品红、天青与青柠绿颜料液滴喷溅
 	var paint_colors: Array[Color] = [
