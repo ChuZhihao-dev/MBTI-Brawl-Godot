@@ -2,6 +2,7 @@ extends Node2D
 class_name MysticOrbProjectile
 
 var owner_fighter: BaseFighter
+var attack_priority: int = BaseFighter.AttackPriority.BASIC
 var sprite_texture: Texture2D
 var _art: Sprite2D
 var _paint_path_start: Vector2
@@ -88,8 +89,8 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 
 func _hit_target(target: BaseFighter) -> void:
-	target.take_damage(damage, knockback, owner_fighter, is_ultimate)
-	if hit_callout != "":
+	var interrupted := target.take_damage(damage, knockback, owner_fighter, is_ultimate, attack_priority)
+	if interrupted and hit_callout != "":
 		var vfx := BattleVFX.get_current(get_tree())
 		if vfx:
 			vfx.spawn_floating_text(target.global_position + Vector2(0.0, -108.0), hit_callout, tint_color.lightened(0.3), 0.94)
@@ -124,8 +125,8 @@ func _detonate_mine() -> void:
 			var push_dir: float = signf(target.global_position.x - global_position.x)
 			if push_dir == 0.0:
 				push_dir = 1.0
-			target.take_damage(damage, Vector2(push_dir * absf(knockback.x), knockback.y), owner_fighter, is_ultimate)
-			if hit_callout != "":
+			var interrupted := target.take_damage(damage, Vector2(push_dir * absf(knockback.x), knockback.y), owner_fighter, is_ultimate, attack_priority)
+			if interrupted and hit_callout != "":
 				if vfx:
 					vfx.spawn_floating_text(target.global_position + Vector2(0.0, -112.0), hit_callout, Color("#fde047"), 1.05)
 	queue_free()

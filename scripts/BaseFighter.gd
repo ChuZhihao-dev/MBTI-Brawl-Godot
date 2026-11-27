@@ -1,6 +1,8 @@
 extends CharacterBody2D
 class_name BaseFighter
 
+enum AttackPriority { BASIC, SKILL, ULTIMATE }
+
 const PaintBlobProjectileScene = preload("res://scripts/PaintBlobProjectile.gd")
 const PaintPuddleHazardScene = preload("res://scripts/PaintPuddleHazard.gd")
 
@@ -60,7 +62,6 @@ var dash_cd: float = 0.0
 var dash_dir: int = 1
 var dash_ghost_timer: float = 0.0
 var invincible_timer: float = 0.0
-var super_armor_timer: float = 0.0
 var can_hit_cancel: bool = false
 var hitstun_timer: float = 0.0
 var hit_flash_timer: float = 0.0
@@ -111,6 +112,8 @@ var _last_charge_level: int = 1
 var current_attack_damage: int = 10
 var current_attack_knockback: Vector2 = Vector2.ZERO
 var current_attack_is_ult: bool = false
+var current_attack_priority := AttackPriority.BASIC
+var _melee_contacts: Dictionary = {}
 var hitbox_active_timer: float = 0.0
 
 # 记录 BaseFighter 初始默认的 Hitbox 尺寸与偏移（供未定制角色的普攻使用）
@@ -250,7 +253,6 @@ func reset_for_new_round(spawn_pos: Vector2, keep_ep_ratio: float = 0.3) -> void
 	dash_timer = 0.0
 	dash_cd = 0.0
 	invincible_timer = 0.0
-	super_armor_timer = 0.0
 	basic_cd = 0.0
 	skill1_cd = 0.0
 	skill2_cd = 0.0
@@ -316,6 +318,8 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 
 			if state_name == "dash" and tex_path.ends_with("dash_sheet_stand_v2.png"):
 				mult = sprite_scale_mult * 392.0 / 432.0
+			elif tex_path.ends_with("guard_paint_curtain_sheet.png"):
+				mult = sprite_scale_mult * 392.0 / 450.0
 			elif state_name == "paint_light":
 				mult = sprite_scale_mult * 392.0 / 353.0 * frame_h / 724.0
 			elif tex_path.ends_with("jump.png") or state_name == "jump" or state_name == "fall":
@@ -335,6 +339,8 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 			_base_sprite_scale = Vector2(sc, sc)
 			sprite.scale = _base_sprite_scale
 			sprite.position = Vector2(0.0, -target_sprite_height * 0.5 + y_off)
+			if tex_path.ends_with("guard_paint_curtain_sheet.png"):
+				sprite.position.y = -215.0 * sc
 		return
 	# ---------------------------------------------------------------
 	if _sheet_textures.is_empty() or sprite == null:
@@ -479,6 +485,19 @@ func _get_effective_move_speed() -> float:
 func _get_attack_speed_mult() -> float:
 	return 1.0
 
+func get_action_armor() -> int:
+	if is_ko or battle_locked or hitstun_timer > 0.0 or shield_broken_timer > 0.0 or dash_timer > 0.0:
+		return AttackPriority.BASIC
+	if paint_ultimate != null and paint_ultimate.active:
+		return AttackPriority.ULTIMATE
+	if action_anim_timer > 0.0 and action_anim_state == "ultimate":
+		return AttackPriority.ULTIMATE
+	if charging_slot != "" or (paint_counter != null and paint_counter.active):
+		return AttackPriority.SKILL
+	if action_anim_timer > 0.0 and action_anim_state in ["skill", "skill1", "aura_buff", "triple_wave", "stance_shift"]:
+		return AttackPriority.SKILL
+	return AttackPriority.BASIC
+
 func _get_melee_range_bonus() -> float:
 	return 0.0
 
@@ -510,7 +529,6 @@ func _physics_process(delta: float) -> void:
 	dash_cd = maxf(0.0, dash_cd - delta)
 	dash_ghost_timer = maxf(0.0, dash_ghost_timer - delta)
 	invincible_timer = maxf(0.0, invincible_timer - delta)
-	super_armor_timer = maxf(0.0, super_armor_timer - delta)
 	hitstun_timer = maxf(0.0, hitstun_timer - delta)
 	block_hit_timer = maxf(0.0, block_hit_timer - delta)
 	jump_startup_timer = maxf(0.0, jump_startup_timer - delta)
@@ -717,7 +735,7 @@ func _physics_process(delta: float) -> void:
 			global_position.y += 8.0
 			jump_buffer_timer = 0.0
 		else:
-			guarding = is_on_floor() and guard_held and dash_timer <= 0.0 and shield_hp > 0.0 and shield_broken_timer <= 0.0
+			guarding = is_on_floor() and guard_held and dash_timer <= 0.0 and shield_hp > 0.0 and shield_broken_timer <= 0.0 and get_action_armor() == AttackPriority.BASIC
 
 		# 2.5 空中快速下落（Fast-Fall）与空中下砸（Down-Slam：空中 S/↓ + 重击）
 		if not is_on_floor() and charging_slot == "" and dash_timer <= 0.0:
@@ -943,9 +961,18 @@ func _physics_process(delta: float) -> void:
 				sprite.position.y = -204.0 * sprite.scale.y
 			elif anim_player.assigned_animation == "paint_light":
 				sprite.position.y = -189.0 * sprite.scale.y
+			elif _uses_paint_guard() and String(anim_player.assigned_animation).begins_with("guard_"):
+				sprite.position.y = -215.0 * sprite.scale.y
 		sprite.rotation = 0.0 if isfp_skill1_pose else _juice_rot
 
 	queue_redraw()
+
+func _uses_paint_guard() -> bool:
+	return fighter_id == "isfp" and anim_player != null and anim_player.has_animation("guard_enter")
+
+func _play_paint_guard_impact() -> void:
+	if _uses_paint_guard() and guarding:
+		_play_anim("guard_impact", true)
 
 func _sync_animation_state() -> void:
 	var has_rig: bool = rig != null and rig.visible
@@ -957,14 +984,35 @@ func _sync_animation_state() -> void:
 			_play_anim(charge_anim_name)
 		elif _sheet_textures.has(charge_anim_name):
 			_play_anim(charge_anim_name)
-	elif block_hit_timer > 0.0 and (has_rig or _sheet_textures.has("block_hit")):
+	elif block_hit_timer > 0.0 and not _uses_paint_guard() and (has_rig or _sheet_textures.has("block_hit")):
 		_play_anim("block_hit")
 	elif dash_timer > 0.0:
 		_play_anim("dash")
 	elif guarding:
-		_play_anim("guard")
+		if _uses_paint_guard():
+			var previous := anim_player.assigned_animation
+			if block_hit_timer > 0.0:
+				_play_anim("guard_impact")
+			elif previous == &"guard_enter" and anim_player.is_playing():
+				pass
+			elif previous in [&"guard_enter", &"guard_hold", &"guard_impact"]:
+				_play_anim("guard_hold")
+			else:
+				_play_anim("guard_enter", true)
+		else:
+			_play_anim("guard")
 	elif action_anim_timer > 0.0 and action_anim_state != "":
-		_play_anim(action_anim_state)
+		if action_anim_state == "stance_shift" or (action_anim_state == "ultimate" and fighter_id == "infj"):
+			_play_anim("skill")
+		elif action_anim_state == "ultimate" and not ((anim_player and anim_player.has_animation("ultimate")) or _sheet_textures.has("ultimate")):
+			_play_anim("heavy")
+		else:
+			_play_anim(action_anim_state)
+	elif _uses_paint_guard() and is_on_floor() and shield_broken_timer <= 0.0 and anim_player.assigned_animation in [&"guard_enter", &"guard_hold", &"guard_impact"]:
+		block_hit_timer = 0.0
+		_play_anim("guard_release", true)
+	elif _uses_paint_guard() and is_on_floor() and shield_broken_timer <= 0.0 and anim_player.current_animation == &"guard_release" and anim_player.is_playing():
+		pass
 	elif not is_on_floor():
 		if jump_startup_timer > 0.0 and (has_rig or _sheet_textures.has("jump_startup")):
 			_play_anim("jump_startup")
@@ -1093,7 +1141,7 @@ func _check_isfp_heavy_hitbox() -> void:
 		can_cancel_attack = true
 		can_hit_cancel = true
 
-func _check_isfp_attack_box(local_box: Rect2, damage: int, knockback: Vector2) -> bool:
+func _check_isfp_attack_box(local_box: Rect2, damage: int, knockback: Vector2, priority: int = AttackPriority.BASIC) -> bool:
 	if facing < 0:
 		local_box.position.x = -local_box.end.x
 	var attack_box := Rect2(global_position + local_box.position, local_box.size)
@@ -1109,7 +1157,7 @@ func _check_isfp_attack_box(local_box: Rect2, damage: int, knockback: Vector2) -
 			continue
 		var bounds := hurtbox.global_transform * Rect2(-shape.size * 0.5, shape.size)
 		if attack_box.intersects(bounds):
-			target.take_damage(damage, knockback, self)
+			target.take_damage(damage, knockback, self, false, priority)
 			return true
 	return false
 
@@ -1203,6 +1251,7 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 		if grp == "NT" or grp == "NF":
 			var orb := MysticOrbProjectile.new()
 			orb.owner_fighter = self
+			orb.attack_priority = AttackPriority.SKILL
 			orb.global_position = global_position + Vector2(facing * 36.0, -54.0)
 			var ang: float = deg_to_rad(-24.0) if dir == "up" else (deg_to_rad(14.0) if dir == "down" else 0.0)
 			var spd: float = 580.0 + level * 70.0
@@ -1216,16 +1265,19 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 		else:
 			velocity.x = facing * (340.0 + level * 70.0)
 			spawn_slash_arc(-110.0, 60.0, 118.0 + level * 12.0, theme_color.lightened(0.2), 0.22)
-			_perform_melee(8 + level * 4, Vector2(facing * (260.0 + level * 75.0), -260.0 if dir == "down" else -160.0), level >= 2)
+			_perform_melee(8 + level * 4, Vector2(facing * (260.0 + level * 75.0), -260.0 if dir == "down" else -160.0), level >= 2, -1.0, false, AttackPriority.SKILL)
 	else:
 		skill2_cd = 6.0
+		action_anim_state = "skill"
+		action_anim_timer = 0.30
+		_play_anim("skill", true)
 		ep = minf(100.0, ep + 10.0 * level)
 		AudioManager.play_sfx("aura_buff", -3.0)
 		if vfx:
 			vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), theme_color, 16.0, 118.0, 0.3, 5.0)
 			vfx.spawn_floating_text(global_position + Vector2(0.0, -108.0), "性格共鸣 +%d EP" % int(10 * level), Color("#38bdf8"), 1.0)
 		if level >= 2:
-			_perform_melee(8 + level * 3, Vector2(facing * 380.0, -220.0), true)
+			_perform_melee(8 + level * 3, Vector2(facing * 380.0, -220.0), true, -1.0, false, AttackPriority.SKILL)
 
 func is_isfp_ultimate_invulnerable() -> bool:
 	return paint_ultimate != null and paint_ultimate.active and paint_ultimate.frame <= 4
@@ -1236,7 +1288,7 @@ func on_ultimate_cast() -> void:
 		return
 	AudioManager.play_sfx("ult_cast", -1.5)
 	invincible_timer = 0.65
-	action_anim_state = "heavy"
+	action_anim_state = "ultimate"
 	action_anim_timer = 0.55
 	_play_anim("heavy", true)
 	var vfx := BattleVFX.get_current(get_tree())
@@ -1246,7 +1298,9 @@ func on_ultimate_cast() -> void:
 	GameManager.trigger_hitstop(0.18)
 	_perform_melee(26, Vector2(facing * 520.0, -320.0), true, 175.0, true)
 
-func _perform_melee(damage: int, knockback: Vector2, is_heavy: bool, custom_range: float = -1.0, is_ultimate: bool = false) -> bool:
+func _perform_melee(damage: int, knockback: Vector2, is_heavy: bool, custom_range: float = -1.0, is_ultimate: bool = false, priority: int = AttackPriority.BASIC) -> bool:
+	_melee_contacts.clear()
+	current_attack_priority = priority
 	current_attack_damage = damage
 	current_attack_knockback = knockback
 	current_attack_is_ult = is_ultimate
@@ -1279,7 +1333,8 @@ func _perform_melee(damage: int, knockback: Vector2, is_heavy: bool, custom_rang
 			continue
 		var diff: Vector2 = target.global_position - global_position
 		if (int(signf(diff.x)) == facing or absf(diff.x) < 28.0) and absf(diff.x) < reach and absf(diff.y) < 92.0:
-			target.take_damage(damage, knockback, self, is_ultimate)
+			_melee_contacts[target.get_instance_id()] = true
+			target.take_damage(damage, knockback, self, is_ultimate, priority)
 			hit_any = true
 	return hit_any
 
@@ -1300,6 +1355,9 @@ func _trigger_shield_break() -> void:
 	guarding = false
 	shield_hp = 0.0
 	shield_broken_timer = 1.8
+	if _uses_paint_guard():
+		block_hit_timer = 0.0
+		_play_anim("hit", true)
 	hitstun_timer = maxf(hitstun_timer, 0.4)
 	velocity = Vector2(-facing * 180.0, -240.0)
 	AudioManager.play_sfx("shield_break", -1.5)
@@ -1307,8 +1365,11 @@ func _trigger_shield_break() -> void:
 	GameManager.trigger_shake(10.0, 0.20, Vector2(0.0, -1.0))
 	var vfx := BattleVFX.get_current(get_tree())
 	if vfx:
-		vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#ef4444"), 16.0, 138.0, 0.34, 6.0)
-		vfx.spawn_hit_particles(global_position + Vector2(0.0, -48.0), Color("#fca5a5"), 22, 360.0)
+		if _uses_paint_guard():
+			vfx.spawn_paint_guard_break(global_position + Vector2(facing * 60.0, -60.0), facing)
+		else:
+			vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#ef4444"), 16.0, 138.0, 0.34, 6.0)
+			vfx.spawn_hit_particles(global_position + Vector2(0.0, -48.0), Color("#fca5a5"), 22, 360.0)
 		vfx.spawn_floating_text(global_position + Vector2(0.0, -118.0), "破防! SHIELD BREAK!", Color("#ef4444"), 1.32)
 
 func _trigger_air_slam_impact() -> void:
@@ -1331,14 +1392,16 @@ func _trigger_air_slam_impact() -> void:
 			var push_x: float = signf(diff.x) if absf(diff.x) > 4.0 else float(facing)
 			target.take_damage(14, Vector2(push_x * 340.0, -390.0), self, false)
 
-func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false) -> void:
+func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ultimate: bool = false, priority: int = AttackPriority.BASIC) -> bool:
 	if is_ko or hp <= 0 or invincible_timer > 0.0 or is_isfp_ultimate_invulnerable():
-		return
+		return false
 	if amount > 0 and paint_counter != null and paint_counter.absorb(attacker):
-		return
+		return false
 	var counter_hit: bool = is_instance_valid(attacker) and attacker.paint_counter != null and attacker.paint_counter.applying_pulse
 	var counter_finisher: bool = counter_hit and attacker.paint_counter.finishing_pulse
 	var paint_combo: bool = is_ultimate and is_instance_valid(attacker) and isfp_ultimate_owner == attacker
+	var incoming_priority: int = AttackPriority.ULTIMATE if is_ultimate else priority
+	var armor := get_action_armor()
 	var eff_amount: int = amount
 	var eff_kb: Vector2 = knockback
 	var vfx := BattleVFX.get_current(get_tree())
@@ -1346,14 +1409,15 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 	var from_front: bool = attacker == null or int(signf(attacker.global_position.x - global_position.x)) == facing
 
 	# 完美格挡（Perfect Parry）：按下防御瞬间 0.14 秒内受击 -> 0 伤 + 18 EP + 恢复护盾 + 弹反对手！
-	if guarding and from_front and not is_ultimate and parry_window_timer > 0.0:
+	if guarding and armor == AttackPriority.BASIC and from_front and not is_ultimate and parry_window_timer > 0.0:
 		parry_window_timer = 0.0
 		ep = minf(100.0, ep + 18.0)
 		shield_hp = minf(100.0, shield_hp + 20.0)
 		block_hit_timer = 0.16
+		_play_paint_guard_impact()
 		GameManager.record_stat(player_index, "parries", 1)
 		AudioManager.play_sfx("parry", -1.5)
-		if attacker:
+		if attacker and attacker.get_action_armor() == AttackPriority.BASIC:
 			attacker.velocity = Vector2(-signf(eff_kb.x) * 320.0, -140.0)
 			attacker.hitstun_timer = maxf(attacker.hitstun_timer, 0.26)
 		if vfx:
@@ -1361,17 +1425,20 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -48.0), "完美格挡! +18 EP", Color("#fde047"), 1.18)
 		GameManager.trigger_hitstop(0.11)
 		GameManager.trigger_shake(7.0, 0.14, Vector2(signf(eff_kb.x), 0.0))
-		return
+		return false
 
-	if guarding and from_front and not is_ultimate:
+	if guarding and armor == AttackPriority.BASIC and from_front and not is_ultimate:
 		var chip: int = maxi(1, int(round(eff_amount * 0.3)))
 		hp = maxi(0, hp - chip)
 		shield_hp = maxf(0.0, shield_hp - float(eff_amount) * 2.2)
 		velocity.x = eff_kb.x * 0.25
 		block_hit_timer = 0.18
+		if shield_hp > 0.0:
+			_play_paint_guard_impact()
 		AudioManager.play_sfx("block", -2.5, randf_range(0.95, 1.08))
 		if vfx:
-			vfx.spawn_hit_fx(hit_pos + Vector2(facing * 20.0, 0.0), Color("#38bdf8"), false, true)
+			if not _uses_paint_guard():
+				vfx.spawn_hit_fx(hit_pos + Vector2(facing * 20.0, 0.0), Color("#38bdf8"), false, true)
 			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -34.0), "格挡 -%d" % chip, Color("#7dd3fc"), 0.9)
 		# 防御顿帧分层：轻击命中防御 2 帧（0.033s）；重击命中防御 4 帧（0.067s）；高冲击/技能 0.08s
 		var block_hitstop: float = 0.033 if (attacker and attacker.action_anim_state == "light") else (0.067 if (attacker and attacker.action_anim_state == "heavy") else 0.08)
@@ -1381,7 +1448,7 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 			_trigger_ko(attacker, false)
 		elif shield_hp <= 0.0:
 			_trigger_shield_break()
-		return
+		return false
 
 	# 连击伤害递减与防无限连击退递增（Pushback Scaling 防止无限压制）
 	var scaled_amount: int = eff_amount
@@ -1393,35 +1460,6 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 			var mult: float = maxf(0.55, 1.0 - float(attacker.current_combo_hits - 1) * 0.07)
 			scaled_amount = maxi(2, int(round(float(eff_amount) * mult)))
 
-	# 霸体状态（Super Armor）：承受 70% 伤害但不被打断硬直或击飞
-	# 若在技能前摇阶段被打断，则取消投射物生成并正常进入冷却
-	if action_anim_state == "paint_light" and not paint_light_fired:
-		action_anim_state = ""
-		action_anim_timer = 0.0
-
-	if action_anim_state == "skill1" and isfp_skill1_active and not isfp_skill1_projectile_spawned:
-		isfp_skill1_active = false
-		action_anim_state = ""
-		action_anim_timer = 0.0
-
-	if super_armor_timer > 0.0 and not is_ultimate:
-		var armor_dmg: int = maxi(1, int(round(float(scaled_amount) * 0.7)))
-		var actual_damage := mini(hp, armor_dmg)
-		hp = maxi(0, hp - armor_dmg)
-		if attacker and attacker.practice_full_energy and actual_damage > 0:
-			attacker.register_combo_hit(actual_damage)
-		ep = minf(100.0, ep + armor_dmg * 0.9)
-		if attacker:
-			GameManager.record_stat(attacker.player_index, "damage", armor_dmg)
-		hit_flash_timer = 0.09
-		AudioManager.play_sfx("block", -3.0, 0.85)
-		if vfx:
-			vfx.spawn_hit_fx(hit_pos, Color("#fde047"), false, false)
-			vfx.spawn_floating_text(hit_pos + Vector2(0.0, -40.0), "霸体 -%d" % armor_dmg, Color("#fde047"), 0.95)
-		if hp <= 0:
-			_trigger_ko(attacker, false)
-		return
-
 	var is_light: bool = attacker != null and attacker.action_anim_state in ["light", "paint_light"] and not is_ultimate
 	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate or (attacker != null and attacker.action_anim_state == "heavy")) and not is_light
 	var actual_damage := mini(hp, scaled_amount)
@@ -1431,6 +1469,11 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		attacker.ep = minf(100.0, attacker.ep + scaled_amount * (0.0 if is_ultimate else 1.1))
 		attacker.register_combo_hit(actual_damage if attacker.practice_full_energy else scaled_amount)
 		GameManager.record_stat(attacker.player_index, "damage", scaled_amount)
+	if incoming_priority < armor:
+		if hp <= 0:
+			_trigger_ko(attacker, is_ultimate)
+		return false
+	_interrupt_move_on_hit()
 	velocity = Vector2(eff_kb.x * pushback_mult, eff_kb.y)
 	# 受击硬直：轻击 10-12 帧（约 0.18s-0.20s）；重击沉稳 14-15 帧（0.24s）；奥义 0.28s
 	hitstun_timer = (19.0 / 60.0 if counter_finisher else 0.13) if counter_hit else (0.28 if is_ultimate else (0.24 if is_heavy else (0.18 if is_light else 0.15)))
@@ -1450,11 +1493,11 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 	if counter_hit:
 		if hp <= 0:
 			_trigger_ko(attacker, false)
-		return
+		return true
 	if paint_combo:
 		if hp <= 0:
 			attacker.paint_ultimate.pending_ko = self
-		return
+		return true
 	if paint_ultimate != null and paint_ultimate.active:
 		paint_ultimate.finish()
 	# 顿帧（Hitstop）：轻击 2-3 帧（0.05s）；重击分层 5 帧（0.083s）；大招 0.11s
@@ -1467,6 +1510,24 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 		Vector2(signf(eff_kb.x), -0.25))
 	if hp <= 0:
 		_trigger_ko(attacker, is_ultimate)
+	return true
+
+func _interrupt_move_on_hit() -> void:
+	charging_slot = ""
+	_charge_particles.clear()
+	if paint_counter != null and paint_counter.active:
+		paint_counter.finish()
+	action_anim_state = ""
+	action_anim_timer = 0.0
+	isfp_light_active = false
+	isfp_heavy_active = false
+	isfp_skill1_active = false
+	isfp_startup_step_timer = 0.0
+	can_cancel_attack = false
+	can_hit_cancel = false
+	hitbox_active_timer = 0.0
+	if hitbox_col:
+		hitbox_col.set_deferred("disabled", true)
 
 func _trigger_ko(killer: BaseFighter, by_ultimate: bool) -> void:
 	if is_ko:
@@ -1505,7 +1566,7 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	# 仅在没有专属防御动作图时显示默认蓝色防御弧
-	if guarding and not is_ko and not _sheet_textures.has("guard"):
+	if guarding and not is_ko and not _uses_paint_guard() and not _sheet_textures.has("guard"):
 		var g_col := Color("#fde047") if parry_window_timer > 0.0 else Color("#38bdf8")
 		draw_arc(Vector2(facing * 26.0, -48.0), 38.0, -0.9 if facing > 0 else PI - 0.9, 0.9 if facing > 0 else PI + 0.9, 16, g_col, 4.5 if parry_window_timer > 0.0 else 4.0)
 	# 仅在没有专属蓄力动画/特效时显示默认蓄力圆环兜底；ISFP使用笔尖聚拢彩色粒子，绝不显示圆圈进度条
@@ -1537,12 +1598,16 @@ func _draw() -> void:
 func _on_hitbox_area_entered(area: Area2D) -> void:
 	var target = area.owner
 	if target != self and target is BaseFighter and not target.is_ko:
+		var target_id: int = target.get_instance_id()
+		if _melee_contacts.has(target_id) or hitbox_active_timer <= 0.0:
+			return
+		_melee_contacts[target_id] = true
 		has_hit_target_in_attack = true
 		can_cancel_attack = true
 		can_hit_cancel = true
 		light_attack_hit_registered = true
 		heavy_attack_hit_registered = true
-		target.take_damage(current_attack_damage, current_attack_knockback, self, current_attack_is_ult)
+		target.take_damage(current_attack_damage, current_attack_knockback, self, current_attack_is_ult, current_attack_priority)
 		if hitbox_col:
 			hitbox_col.set_deferred("disabled", true)
 

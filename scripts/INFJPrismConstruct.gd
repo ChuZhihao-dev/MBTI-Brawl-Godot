@@ -5,6 +5,7 @@ enum Kind { BOUNCE_BLADE, RIFT_SLASH, GRAVITY_PRISM, DECOY_ILLUSION, PRISM_TRAP,
 
 var kind: Kind = Kind.BOUNCE_BLADE
 var owner_fighter: BaseFighter
+var attack_priority: int = BaseFighter.AttackPriority.BASIC
 var velocity: Vector2 = Vector2.ZERO
 var damage: int = 9
 var knockback: Vector2 = Vector2(260.0, -160.0)
@@ -216,7 +217,7 @@ func _tick_bounce_blade(delta: float) -> void:
 		if not _hit_ids.has(tid) and global_position.distance_to(enemy_hit.global_position + Vector2(0.0, -48.0)) <= radius + 22.0:
 			_hit_ids[tid] = true
 			var kb_x: float = signf(velocity.x) * absf(knockback.x)
-			enemy_hit.take_damage(damage, Vector2(kb_x, knockback.y), owner_fighter, false)
+			enemy_hit.take_damage(damage, Vector2(kb_x, knockback.y), owner_fighter, false, attack_priority)
 			queue_free()
 
 func _tick_rift_slash() -> void:
@@ -229,8 +230,8 @@ func _tick_rift_slash() -> void:
 			vfx.spawn_hit_particles(global_position, secondary_color, 14, 300.0)
 		var enemy := _get_enemy()
 		if enemy and global_position.distance_to(enemy.global_position + Vector2(0.0, -48.0)) <= 96.0:
-			enemy.take_damage(damage, knockback, owner_fighter, false)
-			if vfx:
+			var interrupted := enemy.take_damage(damage, knockback, owner_fighter, false, attack_priority)
+			if vfx and interrupted:
 				vfx.spawn_floating_text(enemy.global_position + Vector2(0.0, -108.0), "背刺裂隙!", secondary_color.lightened(0.25), 1.02)
 	if _elapsed >= 0.48:
 		queue_free()
@@ -242,7 +243,7 @@ func _tick_gravity_prism(delta: float) -> void:
 
 	# 爆发前产生轻微向心牵引力，打乱对手走位
 	var enemy := _get_enemy()
-	if not _triggered and enemy and _elapsed >= 0.08:
+	if not _triggered and enemy and _elapsed >= 0.08 and enemy.get_action_armor() <= attack_priority and enemy.invincible_timer <= 0.0 and not enemy.is_isfp_ultimate_invulnerable():
 		var to_center: Vector2 = global_position - (enemy.global_position + Vector2(0.0, -48.0))
 		if to_center.length() <= 165.0 and to_center.length() > 16.0:
 			enemy.velocity += to_center.normalized() * 520.0 * delta
@@ -250,7 +251,6 @@ func _tick_gravity_prism(delta: float) -> void:
 	if not _triggered and _elapsed >= 0.36:
 		_triggered = true
 		AudioManager.play_sfx("hit_heavy", -2.5, 1.12)
-		GameManager.trigger_shake(6.5, 0.14, Vector2(0.0, -1.0))
 		var vfx := BattleVFX.get_current(get_tree())
 		if vfx:
 			vfx.spawn_shockwave_ring(global_position, secondary_color, 14.0, 152.0, 0.28, 6.5)
@@ -260,8 +260,10 @@ func _tick_gravity_prism(delta: float) -> void:
 			var push_x: float = signf(enemy.global_position.x - global_position.x)
 			if push_x == 0.0:
 				push_x = float(facing_dir)
-			enemy.take_damage(damage, Vector2(push_x * 240.0, -390.0), owner_fighter, false)
-			if vfx:
+			var interrupted := enemy.take_damage(damage, Vector2(push_x * 240.0, -390.0), owner_fighter, false, attack_priority)
+			if interrupted:
+				GameManager.trigger_shake(6.5, 0.14, Vector2(0.0, -1.0))
+			if vfx and interrupted:
 				vfx.spawn_floating_text(enemy.global_position + Vector2(0.0, -112.0), "维度坍缩!", secondary_color.lightened(0.25), 1.08)
 	if _elapsed >= 0.56:
 		queue_free()
@@ -276,6 +278,7 @@ func _tick_decoy_illusion() -> void:
 			var blade := INFJPrismConstruct.new()
 			blade.kind = Kind.BOUNCE_BLADE
 			blade.owner_fighter = owner_fighter
+			blade.attack_priority = attack_priority
 			blade.global_position = global_position + Vector2(facing_dir * 26.0, -48.0)
 			blade.velocity = Vector2(facing_dir * 660.0, 0.0)
 			blade.damage = 7
@@ -290,19 +293,19 @@ func _tick_decoy_illusion() -> void:
 	if enemy and _elapsed >= 0.10:
 		var dist: float = global_position.distance_to(enemy.global_position)
 		if dist <= 62.0 or (dist <= 105.0 and enemy.action_anim_timer > 0.0):
-			# 对手误触或攻击幻象 -> 反击碎裂爆破！
-			AudioManager.play_sfx("parry", -2.0, 1.05)
-			GameManager.trigger_hitstop(0.07)
-			GameManager.trigger_shake(6.0, 0.14, Vector2(signf(enemy.global_position.x - global_position.x), -0.3))
-			var vfx := BattleVFX.get_current(get_tree())
-			if vfx:
-				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#fde047"), 14.0, 130.0, 0.28, 6.0)
-				vfx.spawn_hit_particles(global_position + Vector2(0.0, -48.0), tint_color, 22, 340.0)
-				vfx.spawn_floating_text(global_position + Vector2(0.0, -112.0), "幻象反制!", Color("#fde047"), 1.14)
-			var push_x: float = signf(enemy.global_position.x - global_position.x)
+			var push_x := signf(enemy.global_position.x - global_position.x)
 			if push_x == 0.0:
 				push_x = float(facing_dir)
-			enemy.take_damage(damage, Vector2(push_x * 340.0, -260.0), owner_fighter, false)
+			var interrupted := enemy.take_damage(damage, Vector2(push_x * 340.0, -260.0), owner_fighter, false, attack_priority)
+			if interrupted:
+				AudioManager.play_sfx("parry", -2.0, 1.05)
+				GameManager.trigger_hitstop(0.07)
+				GameManager.trigger_shake(6.0, 0.14, Vector2(push_x, -0.3))
+				var vfx := BattleVFX.get_current(get_tree())
+				if vfx:
+					vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -48.0), Color("#fde047"), 14.0, 130.0, 0.28, 6.0)
+					vfx.spawn_hit_particles(global_position + Vector2(0.0, -48.0), tint_color, 22, 340.0)
+					vfx.spawn_floating_text(enemy.global_position + Vector2(0.0, -112.0), "幻象反制!", Color("#fde047"), 1.14)
 			queue_free()
 
 func _tick_prism_trap() -> void:
@@ -313,14 +316,15 @@ func _tick_prism_trap() -> void:
 		return
 	var enemy := _get_enemy()
 	if enemy and global_position.distance_to(enemy.global_position) <= 68.0:
-		AudioManager.play_sfx("hit_heavy", -3.0, 1.2)
-		var vfx := BattleVFX.get_current(get_tree())
-		if vfx:
-			vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -24.0), Color("#fde047"), 10.0, 118.0, 0.26, 5.5)
-			vfx.spawn_hit_particles(global_position + Vector2(0.0, -24.0), tint_color, 18, 320.0)
-			vfx.spawn_floating_text(enemy.global_position + Vector2(0.0, -110.0), "折光捕获!", Color("#fde047"), 1.08)
-		enemy.take_damage(damage, Vector2(0.0, -340.0), owner_fighter, false)
-		enemy.hitstun_timer = maxf(enemy.hitstun_timer, 0.34)
+		var interrupted := enemy.take_damage(damage, Vector2(0.0, -340.0), owner_fighter, false, attack_priority)
+		if interrupted:
+			enemy.hitstun_timer = maxf(enemy.hitstun_timer, 0.34)
+			AudioManager.play_sfx("hit_heavy", -3.0, 1.2)
+			var vfx := BattleVFX.get_current(get_tree())
+			if vfx:
+				vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -24.0), Color("#fde047"), 10.0, 118.0, 0.26, 5.5)
+				vfx.spawn_hit_particles(global_position + Vector2(0.0, -24.0), tint_color, 18, 320.0)
+				vfx.spawn_floating_text(enemy.global_position + Vector2(0.0, -110.0), "折光捕获!", Color("#fde047"), 1.08)
 		queue_free()
 
 func _tick_kaleidoscope_ult() -> void:
@@ -340,7 +344,7 @@ func _tick_kaleidoscope_ult() -> void:
 			vfx.spawn_shockwave_ring(global_position, col, 16.0, 155.0, 0.22, 6.0)
 			vfx.spawn_hit_particles(global_position, col, 18, 380.0)
 		if enemy and global_position.distance_to(enemy.global_position + Vector2(0.0, -48.0)) <= 230.0:
-			enemy.take_damage(6, Vector2(0.0, -95.0), owner_fighter, true)
+			enemy.take_damage(6, Vector2(0.0, -95.0), owner_fighter, true, BaseFighter.AttackPriority.ULTIMATE)
 		_ult_slash_idx += 1
 
 	# 阶段 2：0.72s 全屏万花筒镜界向中心坍缩 · 玻璃碎裂终结！
@@ -360,7 +364,7 @@ func _tick_kaleidoscope_ult() -> void:
 			var push_x: float = signf(enemy.global_position.x - global_position.x)
 			if push_x == 0.0:
 				push_x = float(facing_dir)
-			enemy.take_damage(16, Vector2(push_x * 580.0, -370.0), owner_fighter, true)
+			enemy.take_damage(16, Vector2(push_x * 580.0, -370.0), owner_fighter, true, BaseFighter.AttackPriority.ULTIMATE)
 
 	# 全高清 16:9 逐帧序列播放（支持 4~8 帧自动均分时间轴，每帧原生满清锐利、严格夹在地图与人物之间！）
 	if is_instance_valid(_ult_bg_sprite):

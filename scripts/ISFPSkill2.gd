@@ -190,7 +190,7 @@ func _step(input: Dictionary) -> bool:
 		&"inspiration_dash":
 			if frame >= 6 and frame <= 7 and not lunge_connected:
 				lunge_connected = fighter._check_isfp_attack_box(Rect2(-8.0, -110.0, 116.0, 75.0), 12,
-					Vector2(340.0 * fighter.facing, -145.0))
+					Vector2(340.0 * fighter.facing, -145.0), BaseFighter.AttackPriority.SKILL)
 			if not player.is_playing():
 				finish()
 				return false
@@ -268,9 +268,8 @@ func _pulse() -> void:
 			continue
 		var side := signf(delta.x) if absf(delta.x) > 0.01 else float(fighter.facing)
 		var knockback := Vector2(side * 480.0, -180.0) if finishing_pulse else Vector2.ZERO
-		var before := target.hp
-		target.take_damage(8, knockback, fighter)
-		connected = connected or target.hp < before
+		var interrupted := target.take_damage(8, knockback, fighter, false, BaseFighter.AttackPriority.SKILL)
+		connected = connected or interrupted
 	applying_pulse = false
 	if finishing_pulse:
 		if vfx:
