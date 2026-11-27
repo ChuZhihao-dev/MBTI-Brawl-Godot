@@ -21,6 +21,7 @@ var _add_mat: CanvasItemMaterial
 
 func _ready() -> void:
 	z_index = 26
+	add_to_group("projectiles")
 	_add_mat = CanvasItemMaterial.new()
 	_add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	material = _add_mat
@@ -75,6 +76,17 @@ func _hit_target(target: BaseFighter) -> void:
 		var vfx := BattleVFX.get_current(get_tree())
 		if vfx:
 			vfx.spawn_floating_text(target.global_position + Vector2(0.0, -108.0), hit_callout, tint_color.lightened(0.3), 0.94)
+
+func reflect(new_owner: BaseFighter) -> void:
+	if is_ultimate or is_mine:
+		return
+	owner_fighter = new_owner
+	velocity = -velocity * 1.28
+	knockback.x = -knockback.x
+	damage = int(round(float(damage) * 1.25))
+	_elapsed = 0.0
+	tint_color = Color("#fde047")
+	hit_callout = "棱镜反射!"
 
 func _detonate_mine() -> void:
 	var vfx := BattleVFX.get_current(get_tree())

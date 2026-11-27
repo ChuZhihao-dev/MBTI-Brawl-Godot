@@ -319,6 +319,12 @@ func _finish_round(winner: BaseFighter, reason: String, by_ultimate: bool) -> vo
 			for item in get_tree().get_nodes_in_group("arena_items"):
 				if is_instance_valid(item):
 					item.queue_free()
+			for proj in get_tree().get_nodes_in_group("projectiles"):
+				if is_instance_valid(proj):
+					proj.queue_free()
+			for cons in get_tree().get_nodes_in_group("infj_constructs"):
+				if is_instance_valid(cons):
+					cons.queue_free()
 			GameManager.current_round += 1
 			match_time = MATCH_DURATION
 			if hud and hud.has_method("set_timer_value"):
