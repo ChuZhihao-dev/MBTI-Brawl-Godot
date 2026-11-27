@@ -136,6 +136,8 @@ const SPRITE_SHEETS: Dictionary = {
 		"heavy_surface": {"path": "res://assets/fighters/infj/frames/v3/heavy_dual_sheet.png", "cols": 4, "rows": 2, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
 		"heavy_shadow": {"path": "res://assets/fighters/infj/frames/v3/heavy_dual_sheet.png", "cols": 4, "rows": 2, "start": 4, "frames": 4, "fps": 12.0, "loop": false},
 		"skill": {"path": "res://assets/fighters/infj/frames/skill_sheet.png", "cols": 4, "rows": 1, "start": 0, "frames": 4, "fps": 12.0, "loop": false},
+		"skill1_charge": {"path": "res://assets/fighters/infj/frames/v3/skill1_charge_sheet.png", "cols": 3, "rows": 2, "start": 0, "frames": 5, "fps": 10.0, "loop": true, "loop_start": 2},
+		"skill2_charge": {"path": "res://assets/fighters/infj/frames/v3/skill2_charge_sheet.png", "cols": 3, "rows": 2, "start": 0, "frames": 6, "fps": 10.0, "loop": true, "loop_start": 2},
 		"ultimate": {"path": "res://assets/fighters/infj/frames/v3/ultimate_sheet.png", "cols": 4, "rows": 4, "start": 0, "frames": 16, "fps": 18.0, "loop": false},
 		"hit": {"path": "res://assets/fighters/infj/frames/hit_sheet.png", "cols": 2, "rows": 1, "start": 0, "frames": 2, "fps": 10.0, "loop": false}
 	}
