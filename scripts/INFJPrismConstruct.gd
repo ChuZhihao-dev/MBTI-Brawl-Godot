@@ -22,15 +22,116 @@ var _mimic_fired: bool = false
 var _ult_slash_idx: int = 0
 var _ult_slash_angles: Array[float] = [-0.55, 0.45, -2.55, 2.35]
 var _hit_ids: Dictionary = {}
+var _ult_layer: CanvasLayer
+var _ult_overlay: Control
+var _ult_bg_sprite: Sprite2D
+var _ult_bg_mat: ShaderMaterial
+var _ult_hd_frames: Array[Texture2D] = []
+var _ult_shatter_rect: TextureRect
+var _ult_shards: Array[Dictionary] = []
+var _saved_fighter_z: Dictionary = {}
 
 func _ready() -> void:
 	z_index = 27
 	add_to_group("infj_constructs")
 	if kind == Kind.BOUNCE_BLADE:
 		add_to_group("projectiles")
+	if kind == Kind.KALEIDOSCOPE_ULT:
+		_setup_fullscreen_kaleidoscope()
 	var add_mat := CanvasItemMaterial.new()
 	add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	material = add_mat
+
+func _exit_tree() -> void:
+	if is_instance_valid(_ult_layer):
+		_ult_layer.queue_free()
+	if is_instance_valid(_ult_bg_sprite):
+		_ult_bg_sprite.queue_free()
+	for node in get_tree().get_nodes_in_group("fighters"):
+		if is_instance_valid(node) and node is Node2D:
+			var nid: int = node.get_instance_id()
+			if _saved_fighter_z.has(nid):
+				(node as Node2D).z_index = int(_saved_fighter_z[nid])
+	_saved_fighter_z.clear()
+
+func _setup_fullscreen_kaleidoscope() -> void:
+	# 1. 临时将双方角色抬至 z_index = 12，让万花筒领域(z_index = 5)完美夹在「地图(0)」与「人物(12)」之间！
+	_saved_fighter_z.clear()
+	for node in get_tree().get_nodes_in_group("fighters"):
+		if is_instance_valid(node) and node is Node2D:
+			var f2d := node as Node2D
+			_saved_fighter_z[f2d.get_instance_id()] = f2d.z_index
+			f2d.z_index = 12
+
+	# 自动扫描加载所有高清 16:9 逐帧单图（ult_hd_01.png ~ ult_hd_08.png），每帧原生满清零糊边！
+	_ult_hd_frames.clear()
+	for idx in range(1, 9):
+		var fp := "res://assets/fighters/infj/frames/v3/ult_hd_%02d.png" % idx
+		if ResourceLoader.exists(fp):
+			var t: Texture2D = load(fp) as Texture2D
+			if t:
+				_ult_hd_frames.append(t)
+
+	if not _ult_hd_frames.is_empty():
+		var first_tex: Texture2D = _ult_hd_frames[0]
+		_ult_bg_sprite = Sprite2D.new()
+		_ult_bg_sprite.texture = first_tex
+		_ult_bg_sprite.z_index = 5
+		_ult_bg_sprite.position = Vector2(960.0, 540.0)
+		var sc_hd: float = maxf(2040.0 / maxf(1.0, first_tex.get_size().x), 1160.0 / maxf(1.0, first_tex.get_size().y))
+		_ult_bg_sprite.scale = Vector2(sc_hd, sc_hd)
+		_ult_bg_sprite.modulate = Color(1.0, 1.0, 1.0, 0.0)
+		get_parent().add_child(_ult_bg_sprite)
+	else:
+		var bg_path := "res://assets/fighters/infj/frames/v3/ult_domain_bg.png"
+		if ResourceLoader.exists(bg_path):
+			var tex: Texture2D = load(bg_path) as Texture2D
+			_ult_bg_sprite = Sprite2D.new()
+			_ult_bg_sprite.texture = tex
+			_ult_bg_sprite.z_index = 5
+			_ult_bg_sprite.position = Vector2(960.0, 540.0)
+			var sc2: float = maxf(2040.0 / maxf(1.0, tex.get_size().x), 1160.0 / maxf(1.0, tex.get_size().y))
+			_ult_bg_sprite.scale = Vector2(sc2, sc2)
+			_ult_bg_sprite.modulate = Color(1.0, 1.0, 1.0, 0.0)
+			get_parent().add_child(_ult_bg_sprite)
+
+	# 2. 前景仅放极轻量的纯加法高光层（layer = 0 严格位于 HUD 之下，只叠加空间裂痕激光与终结碎镜星爆！）
+	_ult_layer = CanvasLayer.new()
+	_ult_layer.layer = 0
+	get_tree().current_scene.add_child(_ult_layer)
+
+	var shatter_path := "res://assets/fighters/infj/frames/v3/ult_shatter_fx.png"
+	if ResourceLoader.exists(shatter_path):
+		_ult_shatter_rect = TextureRect.new()
+		_ult_shatter_rect.texture = load(shatter_path) as Texture2D
+		_ult_shatter_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_ult_shatter_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_ult_shatter_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		_ult_shatter_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var add_m := CanvasItemMaterial.new()
+		add_m.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		_ult_shatter_rect.material = add_m
+		_ult_shatter_rect.modulate = Color(1.35, 1.3, 1.2, 0.0)
+		_ult_layer.add_child(_ult_shatter_rect)
+
+	_ult_overlay = Control.new()
+	_ult_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ult_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ult_overlay.draw.connect(_draw_fullscreen_kaleidoscope)
+	_ult_layer.add_child(_ult_overlay)
+	# 预生成 24 块终结飞散碎镜粒子
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(Time.get_ticks_msec()) % 99991
+	_ult_shards.clear()
+	for i in range(24):
+		var ang: float = float(i) * (TAU / 24.0) + rng.randf_range(-0.12, 0.12)
+		_ult_shards.append({
+			"ang": ang,
+			"spd": rng.randf_range(680.0, 1480.0),
+			"size": rng.randf_range(22.0, 52.0),
+			"rot_spd": rng.randf_range(-7.0, 7.0),
+			"col_idx": i % 3
+		})
 
 func reflect(new_owner: BaseFighter) -> void:
 	if kind != Kind.BOUNCE_BLADE:
@@ -225,41 +326,125 @@ func _tick_prism_trap() -> void:
 func _tick_kaleidoscope_ult() -> void:
 	var vfx := BattleVFX.get_current(get_tree())
 	var enemy := _get_enemy()
-	if enemy and _elapsed < 0.56:
-		global_position = global_position.lerp(enemy.global_position + Vector2(0.0, -52.0), 0.16)
+	if enemy and _elapsed < 0.62:
+		global_position = global_position.lerp(enemy.global_position + Vector2(0.0, -52.0), 0.18)
 
-	# 阶段 1：四面八方表里幻影交错穿刺（0.14s, 0.26s, 0.38s, 0.50s）
-	var slash_times: Array[float] = [0.14, 0.26, 0.38, 0.50]
+	# 阶段 1：4 道贯穿全屏的表里空间斩裂光束（0.16s, 0.28s, 0.40s, 0.52s）
+	var slash_times: Array[float] = [0.16, 0.28, 0.40, 0.52]
 	if _ult_slash_idx < slash_times.size() and _elapsed >= slash_times[_ult_slash_idx]:
 		var col: Color = tint_color if (_ult_slash_idx % 2 == 0) else secondary_color
-		AudioManager.play_sfx("swing_heavy", -2.5, 1.15 + float(_ult_slash_idx) * 0.08)
+		AudioManager.play_sfx("swing_heavy", -2.0, 1.12 + float(_ult_slash_idx) * 0.09)
+		GameManager.trigger_shake(6.5, 0.09, Vector2(cos(_ult_slash_angles[_ult_slash_idx]), sin(_ult_slash_angles[_ult_slash_idx])))
 		if vfx:
-			vfx.spawn_shockwave_ring(global_position, col, 14.0, 130.0, 0.22, 5.5)
-			vfx.spawn_hit_particles(global_position, col, 14, 340.0)
-		if enemy and global_position.distance_to(enemy.global_position + Vector2(0.0, -48.0)) <= 185.0:
-			enemy.take_damage(6, Vector2(0.0, -90.0), owner_fighter, true)
+			vfx.trigger_screen_flash(col, 0.16, 0.09)
+			vfx.spawn_shockwave_ring(global_position, col, 16.0, 155.0, 0.22, 6.0)
+			vfx.spawn_hit_particles(global_position, col, 18, 380.0)
+		if enemy and global_position.distance_to(enemy.global_position + Vector2(0.0, -48.0)) <= 230.0:
+			enemy.take_damage(6, Vector2(0.0, -95.0), owner_fighter, true)
 		_ult_slash_idx += 1
 
-	# 阶段 2：0.68s 万花筒镜界向中心坍缩碎裂终结！
-	if not _triggered and _elapsed >= 0.68:
+	# 阶段 2：0.72s 全屏万花筒镜界向中心坍缩 · 玻璃碎裂终结！
+	if not _triggered and _elapsed >= 0.72:
 		_triggered = true
-		AudioManager.play_sfx("ko", -2.0, 1.25)
+		AudioManager.play_sfx("shield_break", -0.5, 0.88)
+		AudioManager.play_sfx("ko", -1.5, 1.18)
 		GameManager.trigger_hitstop(0.16)
-		GameManager.trigger_shake(15.0, 0.28, Vector2(float(facing_dir), -0.35))
+		GameManager.trigger_shake(18.0, 0.34, Vector2(float(facing_dir), -0.35))
 		if vfx:
-			vfx.trigger_screen_flash(Color("#a7f3d0"), 0.36, 0.24)
-			vfx.spawn_shockwave_ring(global_position, Color("#fde047"), 20.0, 240.0, 0.38, 9.0)
-			vfx.spawn_shockwave_ring(global_position, secondary_color, 14.0, 195.0, 0.32, 7.0)
-			vfx.spawn_hit_particles(global_position, Color("#fde047"), 32, 520.0)
-			vfx.spawn_floating_text(global_position + Vector2(0.0, -82.0), "万花筒坍缩!", Color("#fde047"), 1.38)
-		if enemy and global_position.distance_to(enemy.global_position + Vector2(0.0, -48.0)) <= 220.0:
+			vfx.trigger_screen_flash(Color("#fef9c3"), 0.58, 0.26)
+			vfx.spawn_shockwave_ring(global_position, Color("#fde047"), 24.0, 320.0, 0.42, 11.0)
+			vfx.spawn_shockwave_ring(global_position, secondary_color, 16.0, 250.0, 0.36, 8.5)
+			vfx.spawn_hit_particles(global_position, Color("#fde047"), 38, 620.0)
+			vfx.spawn_floating_text(global_position + Vector2(0.0, -96.0), "万花筒镜界 · 坍缩!!", Color("#fde047"), 1.48)
+		if enemy and global_position.distance_to(enemy.global_position + Vector2(0.0, -48.0)) <= 270.0:
 			var push_x: float = signf(enemy.global_position.x - global_position.x)
 			if push_x == 0.0:
 				push_x = float(facing_dir)
-			enemy.take_damage(16, Vector2(push_x * 540.0, -350.0), owner_fighter, true)
+			enemy.take_damage(16, Vector2(push_x * 580.0, -370.0), owner_fighter, true)
 
-	if _elapsed >= 0.98:
+	# 全高清 16:9 逐帧序列播放（支持 4~8 帧自动均分时间轴，每帧原生满清锐利、严格夹在地图与人物之间！）
+	if is_instance_valid(_ult_bg_sprite):
+		var fi: float = clampf(_elapsed / 0.10, 0.0, 1.0)
+		var fo: float = clampf((1.18 - _elapsed) / 0.24, 0.0, 1.0)
+		if not _ult_hd_frames.is_empty():
+			var norm_t: float = clampf(_elapsed / 1.02, 0.0, 0.999)
+			var f_idx: int = clampi(int(floor(norm_t * float(_ult_hd_frames.size()))), 0, _ult_hd_frames.size() - 1)
+			var target_tex: Texture2D = _ult_hd_frames[f_idx]
+			if _ult_bg_sprite.texture != target_tex:
+				_ult_bg_sprite.texture = target_tex
+		_ult_bg_sprite.modulate = Color(0.94, 0.96, 0.98, 0.90 * fi * fo)
+
+	if is_instance_valid(_ult_shatter_rect):
+		var vp_s: Vector2 = _ult_shatter_rect.get_viewport_rect().size
+		_ult_shatter_rect.pivot_offset = vp_s * 0.5
+		if _elapsed >= 0.70:
+			var dt_s: float = _elapsed - 0.70
+			var s_a: float = clampf(1.0 - dt_s / 0.40, 0.0, 1.0)
+			var s_sc: float = lerpf(0.85, 1.32, clampf(dt_s / 0.30, 0.0, 1.0))
+			_ult_shatter_rect.scale = Vector2(s_sc, s_sc)
+			_ult_shatter_rect.modulate = Color(0.95, 0.92, 0.88, s_a * 0.62)
+		else:
+			_ult_shatter_rect.modulate.a = 0.0
+
+	if is_instance_valid(_ult_overlay):
+		_ult_overlay.queue_redraw()
+	if _elapsed >= 1.18:
 		queue_free()
+
+func _draw_fullscreen_kaleidoscope() -> void:
+	if not is_instance_valid(_ult_overlay):
+		return
+	var vp: Vector2 = _ult_overlay.get_viewport_rect().size
+	var center: Vector2 = vp * 0.5
+	var has_art_bg: bool = is_instance_valid(_ult_bg_sprite)
+	var fade_in: float = clampf(_elapsed / 0.14, 0.0, 1.0)
+	var fade_out: float = clampf((1.18 - _elapsed) / 0.30, 0.0, 1.0)
+	var alpha: float = fade_in * fade_out
+
+	# 若已加载精绘万花筒背景图，仅叠加极轻暗角与空间斩裂激光；不再画粗糙的纯色大三角！
+	if not has_art_bg:
+		var dark_a: float = 0.58 * alpha if _elapsed < 0.72 else 0.42 * fade_out
+		_ult_overlay.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.04, 0.03, 0.11, dark_a), true)
+
+	if _elapsed < 0.74:
+		# 4 道贯穿整个 1920x1080 屏幕的空间斩裂激光（叠加在精绘万花筒隧道上极度炸裂！）
+		for k in range(_ult_slash_idx):
+			var slash_t: float = _elapsed - (0.16 + float(k) * 0.12)
+			var s_fade: float = clampf(1.0 - slash_t / 0.36, 0.0, 1.0)
+			if s_fade <= 0.0:
+				continue
+			var sa: float = _ult_slash_angles[k]
+			var sv := Vector2(cos(sa), sin(sa))
+			var scol: Color = tint_color if (k % 2 == 0) else secondary_color
+			_ult_overlay.draw_line(center - sv * 1400.0, center + sv * 1400.0, Color(scol.r, scol.g, scol.b, 0.78 * s_fade), 24.0 * s_fade, true)
+			_ult_overlay.draw_line(center - sv * 1400.0, center + sv * 1400.0, Color(1.0, 1.0, 0.92, 0.96 * s_fade), 6.0 * s_fade, true)
+	else:
+		# 0.72s 终结：叠加碎镜冲击裂纹与飞散镜片（若加载了 ult_shatter_fx.png 则作为额外粒子层次烘托）
+		var dt_boom: float = _elapsed - 0.72
+		var crack_a: float = clampf(1.0 - dt_boom / 0.38, 0.0, 1.0)
+		if not is_instance_valid(_ult_shatter_rect):
+			for r_i in range(10):
+				var ca: float = float(r_i) * (TAU / 10.0) + 0.18
+				var cv := Vector2(cos(ca), sin(ca))
+				_ult_overlay.draw_line(center, center + cv * 1100.0, Color(1.0, 0.96, 0.78, 0.72 * crack_a), 4.0 * crack_a, true)
+		for sh: Dictionary in _ult_shards:
+			var ang: float = float(sh["ang"])
+			var spd: float = float(sh["spd"])
+			var sz: float = float(sh["size"]) * (1.0 - dt_boom * 0.55)
+			if sz <= 2.0:
+				continue
+			var pos: Vector2 = center + Vector2(cos(ang), sin(ang)) * (dt_boom * spd)
+			var srot: float = ang + dt_boom * float(sh["rot_spd"])
+			var c_idx: int = int(sh["col_idx"])
+			var scol2: Color = tint_color if c_idx == 0 else (secondary_color if c_idx == 1 else Color("#fde047"))
+			var fdir := Vector2(cos(srot), sin(srot))
+			var fperp := Vector2(-fdir.y, fdir.x)
+			_ult_overlay.draw_colored_polygon(PackedVector2Array([
+				pos + fdir * sz,
+				pos + fperp * (sz * 0.52),
+				pos - fdir * (sz * 0.85),
+				pos - fperp * (sz * 0.45)
+			]), Color(scol2.r, scol2.g, scol2.b, 0.85 * crack_a))
 
 func _draw() -> void:
 	match kind:

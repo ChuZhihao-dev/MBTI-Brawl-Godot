@@ -413,12 +413,13 @@ func on_charge_skill_release(slot: String, level: int, dir: String) -> void:
 			dual_persona_timer = 5.5
 
 func on_ultimate_cast() -> void:
-	# 万花筒心域 · Kaleidoscope：多面体镜界展开 + 表里幻影四向交错穿刺 + 镜界坍缩终结
+	# 万花筒心域 · Kaleidoscope：全屏领域暗幕 + 12面旋转镜界 + 4道贯穿空间裂痕 + 全屏碎镜坍缩终结
 	AudioManager.play_sfx("ult_cast", -1.0)
-	invincible_timer = 0.95
-	action_anim_state = "skill"
-	action_anim_timer = 0.72
-	_play_anim("skill", true)
+	invincible_timer = 1.15
+	var ult_anim: String = "ultimate" if _sheet_textures.has("ultimate") else "skill"
+	action_anim_state = ult_anim
+	action_anim_timer = 0.88
+	_play_anim(ult_anim, true)
 	trigger_squash(0.88, 1.18)
 
 	var vfx := BattleVFX.get_current(get_tree())
