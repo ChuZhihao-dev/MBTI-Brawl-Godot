@@ -90,6 +90,10 @@ func _physics_process(delta: float) -> void:
 		if absf(diff.x) <= base_radius_x * 1.15 and diff.y >= -54.0 and diff.y <= 16.0:
 			_apply_puddle_effect(target, delta)
 
+func contains_feet(world_position: Vector2) -> bool:
+	var offset := world_position - global_position
+	return _elapsed < lifetime and not is_queued_for_deletion() and absf(offset.x) <= base_radius_x and absf(offset.y) <= base_radius_y
+
 func _apply_puddle_effect(target: BaseFighter, delta: float) -> void:
 	# 1. 移动减速状态（降低至 58%），刷新减速持续时间
 	target.paint_slow_timer = 0.22

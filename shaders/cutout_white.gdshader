@@ -1,5 +1,6 @@
 shader_type canvas_item;
 
+uniform bool hide_atlas_paint_orb = false;
 uniform float enable_white_key : hint_range(0.0, 1.0) = 0.0;
 uniform float white_threshold : hint_range(0.75, 0.99) = 0.92;
 uniform float feather : hint_range(0.01, 0.15) = 0.05;
@@ -9,6 +10,12 @@ uniform float aura_glow : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 aura_color : source_color = vec4(0.28, 0.94, 0.62, 1.0);
 
 void fragment() {
+	// The ranged-light sheet includes a painted projectile in its two release poses.
+	// The real projectile is rendered separately at its world position.
+	if (hide_atlas_paint_orb && UV.y > 0.5 &&
+		((UV.x > 0.424 && UV.x < 0.5) || (UV.x > 0.677 && UV.x < 0.75))) {
+		discard;
+	}
 	vec4 tex = texture(TEXTURE, UV);
 	float a = tex.a;
 

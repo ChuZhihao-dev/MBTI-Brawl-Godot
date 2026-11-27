@@ -3,6 +3,9 @@ extends Node2D
 const NO_HIT = preload("res://assets/fighters/isfp/newframes/skill_i_no_hit_12f_stand_v2.png")
 const ON_HIT = preload("res://assets/fighters/isfp/newframes/skill_i_on_hit_12f_stand_v2.png")
 const IDLE_TRANSITION = preload("res://assets/fighters/isfp/newframes/skill_i_idle_transition_3f_v2.png")
+const LUNGE_SHEET = preload("res://assets/fighters/isfp/newframes/inspiration_dash_sheet_stand_v2.png")
+const CUTOUT = preload("res://shaders/cutout_white.gdshader")
+const LUNGE_TICKS: Array[int] = [3, 3, 3, 4, 4, 5, 4, 4]
 const STEP := 1.0 / 60.0
 const skill2BranchA_NoHitConfig := {
 	"startup_ticks": [3, 3, 3, 4],
@@ -24,6 +27,9 @@ const IDLE_TRANSITION_TICKS: Array[int] = [4, 4, 5]
 @onready var player: AnimationPlayer = $AnimationPlayer
 
 var active := false
+var counter_triggered := false
+var lunge_connected := false
+var lunge_material: ShaderMaterial
 var applying_pulse := false
 var finishing_pulse := false
 var phase: StringName
@@ -37,11 +43,15 @@ var elapsed_ticks := 0.0
 var idle_blend_tick := 0
 
 func _ready() -> void:
+	lunge_material = ShaderMaterial.new()
+	lunge_material.shader = CUTOUT
+	lunge_material.set_shader_parameter("enable_white_key", 1.0)
 	var library := AnimationLibrary.new()
 	_add_clip(library, &"startup", NO_HIT, 0, skill2BranchA_NoHitConfig.startup_ticks)
 	_add_clip(library, &"sense", NO_HIT, 4, skill2BranchA_NoHitConfig.breath_ticks, true)
 	_add_clip(library, &"recover", NO_HIT, 6, skill2BranchA_NoHitConfig.recovery_ticks)
 	_add_clip(library, &"counter", ON_HIT, 6, COUNTER_TICKS)
+	_add_clip(library, &"inspiration_dash", LUNGE_SHEET, 0, LUNGE_TICKS)
 	_add_clip(library, &"idle_transition", IDLE_TRANSITION, 0, IDLE_TRANSITION_TICKS)
 	player.add_animation_library(&"", library)
 	player.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
@@ -67,6 +77,8 @@ func _add_clip(library: AnimationLibrary, clip: StringName, sheet: Texture2D, fi
 func start() -> void:
 	active = true
 	connected = false
+	counter_triggered = false
+	lunge_connected = false
 	absorbed_attacker = null
 	buffer_ticks = 0
 	last_pulse_frame = 0
@@ -92,11 +104,15 @@ func _play(clip: StringName) -> void:
 	phase = clip
 	ticks = 0
 	var is_transition := clip == &"idle_transition"
+	var is_lunge := clip == &"inspiration_dash"
 	pose.frame = 0
-	pose.hframes = 3 if is_transition else 6
+	pose.hframes = 3 if is_transition else (4 if is_lunge else 6)
 	pose.vframes = 1 if is_transition else 2
+	pose.material = lunge_material if is_lunge else null
 	if is_transition:
 		_align_pose(670.0, 325.0)
+	elif is_lunge:
+		_align_pose(326.0, 166.0)
 	else:
 		_align_pose(326.0, 167.0)
 	player.play(clip)
@@ -125,6 +141,8 @@ func tick(delta: float, input: Dictionary) -> bool:
 	fighter.velocity.x = 0.0
 	if phase == &"startup" and frame <= 3:
 		fighter.velocity.x = signf(float(input["horiz"])) * float(skill2BranchA_NoHitConfig.slide_speed)
+	elif phase == &"inspiration_dash" and frame >= 3 and frame <= 6:
+		fighter.velocity.x = fighter.facing * _lunge_speed(delta)
 	if not fighter.is_on_floor():
 		fighter.velocity.y += fighter.gravity_force * delta
 	fighter.move_and_slide()
@@ -132,6 +150,9 @@ func tick(delta: float, input: Dictionary) -> bool:
 	return active
 
 func _step(input: Dictionary) -> bool:
+	if not counter_triggered and phase in [&"recover", &"idle_transition"] and bool(input.get("skill2_just", false)):
+		_begin_lunge()
+		return true
 	ticks += 1
 	buffer_ticks = maxi(0, buffer_ticks - 1)
 	if phase == &"recover" and bool(input["light_just"]):
@@ -166,6 +187,13 @@ func _step(input: Dictionary) -> bool:
 				return false
 			if not player.is_playing():
 				_play(&"idle_transition")
+		&"inspiration_dash":
+			if frame >= 6 and frame <= 7 and not lunge_connected:
+				lunge_connected = fighter._check_isfp_attack_box(Rect2(-8.0, -110.0, 116.0, 75.0), 12,
+					Vector2(340.0 * fighter.facing, -145.0))
+			if not player.is_playing():
+				finish()
+				return false
 		&"idle_transition":
 			if bool(input["dash_just"]) and fighter.dash_cd <= 0.0:
 				finish()
@@ -176,6 +204,29 @@ func _step(input: Dictionary) -> bool:
 			if frame == 15:
 				_blend_into_idle()
 	return true
+
+func _lunge_speed(delta: float) -> float:
+	var speed := 340.0 if frame == 3 else (450.0 if frame <= 5 else 430.0)
+	if lunge_connected:
+		return speed * 0.35
+	for node in get_tree().get_nodes_in_group("fighters"):
+		var target := node as BaseFighter
+		if target == null or target == fighter or target.is_ko or target.invincible_timer > 0.0:
+			continue
+		var gap := target.global_position - fighter.global_position
+		var ahead := gap.x * fighter.facing
+		if ahead >= -8.0 and absf(gap.y) <= 64.0:
+			speed = minf(speed, maxf(0.0, ahead - 26.0) / delta)
+	return speed
+
+func _begin_lunge() -> void:
+	fighter.sprite.hide()
+	fighter.action_anim_state = "inspiration_dash"
+	pose.self_modulate.a = 1.0
+	buffer_ticks = 0
+	lunge_connected = false
+	_play(&"inspiration_dash")
+	AudioManager.play_sfx("swing_heavy", -5.0, 1.12)
 
 func _blend_into_idle() -> void:
 	if idle_blend_tick == 0:
@@ -195,6 +246,7 @@ func absorb(attacker: BaseFighter) -> bool:
 	if phase != &"sense":
 		return false
 	absorbed_attacker = attacker
+	counter_triggered = true
 	_play(&"counter")
 	var vfx := BattleVFX.get_current(get_tree())
 	if vfx:

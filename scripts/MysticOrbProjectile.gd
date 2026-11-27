@@ -2,6 +2,9 @@ extends Node2D
 class_name MysticOrbProjectile
 
 var owner_fighter: BaseFighter
+var sprite_texture: Texture2D
+var _art: Sprite2D
+var _paint_path_start: Vector2
 var velocity: Vector2 = Vector2(560.0, 0.0)
 var damage: int = 8
 var knockback: Vector2 = Vector2(210.0, -110.0)
@@ -22,6 +25,16 @@ var _add_mat: CanvasItemMaterial
 func _ready() -> void:
 	z_index = 26
 	add_to_group("projectiles")
+	if sprite_texture != null:
+		_art = Sprite2D.new()
+		_art.texture = sprite_texture
+		_art.scale = Vector2.ONE * (58.0 / sprite_texture.get_width())
+		add_child(_art)
+		_paint_path_start = global_position
+		if is_instance_valid(owner_fighter):
+			_paint_path_start.x = owner_fighter.global_position.x
+		_update_art_facing()
+		return
 	_add_mat = CanvasItemMaterial.new()
 	_add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	material = _add_mat
@@ -42,7 +55,7 @@ func _physics_process(delta: float) -> void:
 			return
 
 	_ember_timer -= delta
-	if _ember_timer <= 0.0:
+	if _art == null and _ember_timer <= 0.0:
 		_ember_timer = 0.06 if not is_mine else 0.14
 		var vfx := BattleVFX.get_current(get_tree())
 		if vfx:
@@ -60,7 +73,10 @@ func _physics_process(delta: float) -> void:
 			continue
 		var target_center: Vector2 = target.global_position + Vector2(0.0, -48.0)
 		var trigger_r: float = (explode_radius * 0.55) if is_mine else hit_radius
-		if global_position.distance_to(target_center) <= trigger_r:
+		var contact := global_position
+		if _art != null:
+			contact = Geometry2D.get_closest_point_to_segment(target_center, _paint_path_start, global_position)
+		if contact.distance_squared_to(target_center) <= trigger_r * trigger_r:
 			if is_mine:
 				_detonate_mine()
 			else:
@@ -68,6 +84,7 @@ func _physics_process(delta: float) -> void:
 				queue_free()
 			return
 
+	_paint_path_start = global_position
 	queue_redraw()
 
 func _hit_target(target: BaseFighter) -> void:
@@ -82,6 +99,8 @@ func reflect(new_owner: BaseFighter) -> void:
 		return
 	owner_fighter = new_owner
 	velocity = -velocity * 1.28
+	_paint_path_start = global_position
+	_update_art_facing()
 	knockback.x = -knockback.x
 	damage = int(round(float(damage) * 1.25))
 	_elapsed = 0.0
@@ -111,7 +130,15 @@ func _detonate_mine() -> void:
 					vfx.spawn_floating_text(target.global_position + Vector2(0.0, -112.0), hit_callout, Color("#fde047"), 1.05)
 	queue_free()
 
+func _update_art_facing() -> void:
+	if _art != null:
+		var orientation := -1.0 if velocity.x < 0.0 else 1.0
+		_art.flip_h = orientation < 0.0
+		_art.position.x = -8.0 * orientation
+
 func _draw() -> void:
+	if _art != null:
+		return
 	var pulse: float = 1.0 + 0.14 * sin(_elapsed * 18.0)
 	var r: float = orb_radius * pulse
 	var hdr_outer := Color(tint_color.r * 1.9, tint_color.g * 1.9, tint_color.b * 1.9, 0.65)

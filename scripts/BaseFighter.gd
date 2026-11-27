@@ -75,6 +75,7 @@ var light_attack_hit_registered: bool = false
 var heavy_attack_hit_registered: bool = false
 var isfp_startup_step_timer: float = 0.0
 var isfp_light_active: bool = false
+var paint_light_fired := false
 var isfp_heavy_active: bool = false
 var isfp_skill1_active: bool = false
 var isfp_skill1_projectile_spawned: bool = false
@@ -300,6 +301,10 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 		anim_player.play(state_name)
 		# 核心关键：立即将动画推进一步（advance(0)），让 AnimationPlayer 的第 0 秒贴图和切片轨道立即生效！
 		anim_player.advance(0.0)
+		if fighter_id == "isfp" and sprite.material is ShaderMaterial:
+			var use_atlas_key := state_name in ["dash", "paint_light"]
+			sprite.material.set_shader_parameter("enable_white_key", 1.0 if use_atlas_key else 0.0)
+			sprite.material.set_shader_parameter("hide_atlas_paint_orb", state_name == "paint_light")
 
 		# 此时 sprite.texture 已经是新动画切换后的正式图片了，再进行缩放与踩地高度校准！
 		if sprite and sprite.texture:
@@ -309,7 +314,11 @@ func _play_anim(state_name: String, force_reset: bool = false) -> void:
 			var mult: float = sprite_scale_mult
 			var y_off: float = sprite_y_offset
 
-			if tex_path.ends_with("jump.png") or state_name == "jump" or state_name == "fall":
+			if state_name == "dash" and tex_path.ends_with("dash_sheet_stand_v2.png"):
+				mult = sprite_scale_mult * 392.0 / 432.0
+			elif state_name == "paint_light":
+				mult = sprite_scale_mult * 392.0 / 353.0 * frame_h / 724.0
+			elif tex_path.ends_with("jump.png") or state_name == "jump" or state_name == "fall":
 				# jump/fall 序列帧人物实际躯干占高 ~288px，统一缩放到与 stand(407px)/move(317px) 完全一致的视觉比例！
 				mult = sprite_scale_mult * (407.0 / 288.0)
 				y_off = -17.0
@@ -473,6 +482,9 @@ func _get_attack_speed_mult() -> float:
 func _get_melee_range_bonus() -> float:
 	return 0.0
 
+func _uses_isfp_dash_sheet() -> bool:
+	return fighter_id == "isfp" and anim_player != null and anim_player.has_animation("dash")
+
 func _get_dash_duration() -> float:
 	return 0.22
 
@@ -534,6 +546,12 @@ func _physics_process(delta: float) -> void:
 		# 取消窗口：从第 8 帧（命中确认后）或后摇阶段（第 8-12 帧，t >= 0.116s）允许立即派生取消
 		if elapsed_time >= 0.116 or has_hit_target_in_attack:
 			can_cancel_attack = true
+	elif action_anim_state == "paint_light" and not paint_light_fired and action_anim_timer > 0.0:
+		if hitstun_timer > 0.0:
+			action_anim_timer = 0.0
+			action_anim_state = ""
+		elif action_anim_timer <= 0.0751:
+			_launch_paint_light_orb()
 	elif action_anim_state == "heavy" and isfp_heavy_active:
 		var elapsed_heavy: float = 0.38 - action_anim_timer
 		# 重击判定生效期（第 5-8 帧，0.17s <= t <= 0.31s）：向前重击覆盖
@@ -751,7 +769,7 @@ func _physics_process(delta: float) -> void:
 						_perform_light_attack()
 					else:
 						_perform_heavy_attack()
-				elif dash_ghost_timer <= 0.0:
+				elif dash_ghost_timer <= 0.0 and not _uses_isfp_dash_sheet():
 					dash_ghost_timer = 0.042
 					var vfx := BattleVFX.get_current(get_tree())
 					if vfx:
@@ -884,7 +902,7 @@ func _physics_process(delta: float) -> void:
 			if tech_vfx:
 				tech_vfx.spawn_shockwave_ring(global_position + Vector2(0.0, -24.0), Color("#34d399"), 10.0, 74.0, 0.22, 4.0)
 				tech_vfx.spawn_floating_text(global_position + Vector2(0.0, -96.0), "受身 TECH!", Color("#34d399"), 1.08)
-				if sprite and sprite.visible:
+				if sprite and sprite.visible and not (_uses_isfp_dash_sheet() and anim_player.assigned_animation == "dash"):
 					tech_vfx.spawn_ghost(sprite, Color("#34d399"), 0.24)
 		else:
 			landing_timer = 0.14
@@ -920,6 +938,11 @@ func _physics_process(delta: float) -> void:
 		var final_sy: float = 1.0 if isfp_skill1_pose else _juice_scale.y * breath_sy
 		sprite.scale = Vector2(_base_sprite_scale.x * final_sx, _base_sprite_scale.y * final_sy)
 		sprite.position.y = -target_sprite_height * 0.5 * final_sy + 4.0
+		if fighter_id == "isfp" and anim_player != null:
+			if anim_player.assigned_animation == "dash":
+				sprite.position.y = -204.0 * sprite.scale.y
+			elif anim_player.assigned_animation == "paint_light":
+				sprite.position.y = -189.0 * sprite.scale.y
 		sprite.rotation = 0.0 if isfp_skill1_pose else _juice_rot
 
 	queue_redraw()
@@ -963,6 +986,16 @@ func _perform_light_attack() -> void:
 	can_cancel_attack = false
 	light_attack_hit_registered = false
 
+	if fighter_id == "isfp" and anim_player != null and anim_player.has_animation("paint_light") and _standing_in_own_paint():
+		isfp_light_active = false
+		paint_light_fired = false
+		action_anim_state = "paint_light"
+		action_anim_timer = 0.20
+		basic_cd = 0.20
+		velocity.x = 0.0
+		_play_anim("paint_light", true)
+		return
+
 	if is_isfp:
 		# 严格 12 帧（60 FPS = 0.20s）时间轴切片
 		action_anim_state = "light"
@@ -986,6 +1019,29 @@ func _perform_light_attack() -> void:
 		spawn_slash_arc(-65.0, 48.0, 90.0, theme_color.lightened(0.25), 0.14)
 		AudioManager.play_sfx("swing_light", -6.0, randf_range(0.94, 1.1))
 		_perform_melee(8, Vector2(facing * 240.0, -120.0), false)
+
+func _standing_in_own_paint() -> bool:
+	if not is_on_floor():
+		return false
+	for node in get_tree().get_nodes_in_group("paint_puddles"):
+		var puddle := node as PaintPuddleHazard
+		if puddle != null and puddle.owner_fighter == self and puddle.contains_feet(global_position):
+			return true
+	return false
+
+func _launch_paint_light_orb() -> void:
+	paint_light_fired = true
+	var orb := MysticOrbProjectile.new()
+	orb.owner_fighter = self
+	orb.sprite_texture = load("res://assets/fighters/isfp/newframes/paint_orb.png") as Texture2D
+	orb.damage = 8
+	orb.velocity = Vector2(760.0 * facing, 0.0)
+	orb.knockback = Vector2(220.0 * facing, -90.0)
+	orb.hit_radius = 32.0
+	orb.max_lifetime = 0.68
+	orb.position = get_parent().to_local(global_position + Vector2(62.0 * facing, -74.0))
+	get_parent().add_child(orb)
+	AudioManager.play_sfx("swing_light", -6.0)
 
 func _check_isfp_light_hitbox() -> void:
 	if light_attack_hit_registered:
@@ -1339,6 +1395,10 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 
 	# 霸体状态（Super Armor）：承受 70% 伤害但不被打断硬直或击飞
 	# 若在技能前摇阶段被打断，则取消投射物生成并正常进入冷却
+	if action_anim_state == "paint_light" and not paint_light_fired:
+		action_anim_state = ""
+		action_anim_timer = 0.0
+
 	if action_anim_state == "skill1" and isfp_skill1_active and not isfp_skill1_projectile_spawned:
 		isfp_skill1_active = false
 		action_anim_state = ""
@@ -1362,7 +1422,7 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 			_trigger_ko(attacker, false)
 		return
 
-	var is_light: bool = attacker != null and attacker.action_anim_state == "light" and not is_ultimate
+	var is_light: bool = attacker != null and attacker.action_anim_state in ["light", "paint_light"] and not is_ultimate
 	var is_heavy: bool = (scaled_amount >= 11 or is_ultimate or (attacker != null and attacker.action_anim_state == "heavy")) and not is_light
 	var actual_damage := mini(hp, scaled_amount)
 	hp = maxi(0, hp - scaled_amount)
@@ -1398,11 +1458,13 @@ func take_damage(amount: int, knockback: Vector2, attacker: BaseFighter, is_ulti
 	if paint_ultimate != null and paint_ultimate.active:
 		paint_ultimate.finish()
 	# 顿帧（Hitstop）：轻击 2-3 帧（0.05s）；重击分层 5 帧（0.083s）；大招 0.11s
-	GameManager.trigger_hitstop(0.11 if is_ultimate else (0.083 if is_heavy else 0.05))
+	var inspiration_hit := is_instance_valid(attacker) and attacker.action_anim_state == "inspiration_dash"
+	GameManager.trigger_hitstop(7.0 / 60.0 if inspiration_hit else (0.11 if is_ultimate else (0.083 if is_heavy else 0.05)))
 	# 镜头震屏：轻击克制轻巧（2.5px，0.06s）；重击沉稳有力（7.5px，0.14s）；大招震撼（13px，0.22s）
 	var shake_amp: float = 13.0 if is_ultimate else (7.5 if is_heavy else (2.5 if is_light else 4.5))
 	var shake_dur: float = 0.22 if is_ultimate else (0.14 if is_heavy else (0.06 if is_light else 0.1))
-	GameManager.trigger_shake(shake_amp, shake_dur, Vector2(signf(eff_kb.x), -0.25))
+	GameManager.trigger_shake(10.0 if inspiration_hit else shake_amp, 0.16 if inspiration_hit else shake_dur,
+		Vector2(signf(eff_kb.x), -0.25))
 	if hp <= 0:
 		_trigger_ko(attacker, is_ultimate)
 
